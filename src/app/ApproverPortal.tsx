@@ -376,7 +376,7 @@ export function ApproverPortal({
                   tab === 'home' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
-                Home
+                Catalog
               </button>
               <button
                 onClick={() => setTab('requests')}
