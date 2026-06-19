@@ -23,11 +23,13 @@ interface RequestCardProps {
   disableApprove?: boolean;
   disableApproveTooltip?: string;
   isNested?: boolean;
+  /** Submitter's view of their own request: show status, hide approve/reject + checkbox. */
+  readOnly?: boolean;
 }
 
 export function RequestCard({
   request, onApprove, onReject, selected, onToggleSelect,
-  disableApprove, disableApproveTooltip, isNested,
+  disableApprove, disableApproveTooltip, isNested, readOnly,
 }: RequestCardProps) {
   const diff = getRequestDiff(request);
   const { isCreate, isEntity, changedSet } = diff;
@@ -98,13 +100,13 @@ export function RequestCard({
 
         {/* Status + actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          {!isPending && (
+          {(readOnly || !isPending) && (
             <span className={`px-2.5 py-1 rounded-md text-xs font-medium border ${statusColors[request.status]} capitalize`}>
               {request.status}
             </span>
           )}
 
-          {isPending && (
+          {isPending && !readOnly && (
             <>
               <TooltipPrimitive.Provider>
                 <TooltipPrimitive.Root delayDuration={200}>

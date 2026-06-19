@@ -11,7 +11,7 @@ import { RequestCard, EntityViewCard } from './components/RequestCard';
 import { FocusModeView } from './components/FocusModeView';
 import { RejectDialog } from './components/shared/RejectDialog';
 import { countDataItems, countMatches } from './lib/catalog';
-import { RecordTypeIcon } from './lib/badges';
+import { RecordTypeIcon, TypeLegend } from './lib/badges';
 import { ApproveButton, RejectButton } from './components/ui/ActionButton';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import { toast } from 'sonner';
@@ -430,24 +430,27 @@ export function ApproverPortal({
                     : 'Read-only view · Click any row to inspect its full metadata'}
                 </p>
               </div>
-              {/* Tree / Table toggle — inline with the section it controls */}
-              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
-                <button
-                  onClick={() => setHomeView('tree')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    homeView === 'tree' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <GitBranch className="w-3.5 h-3.5" /> Tree
-                </button>
-                <button
-                  onClick={() => setHomeView('table')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    homeView === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <LayoutList className="w-3.5 h-3.5" /> Table
-                </button>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                {homeView === 'tree' && <TypeLegend className="hidden lg:flex" />}
+                {/* Tree / Table toggle — inline with the section it controls */}
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setHomeView('tree')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      homeView === 'tree' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <GitBranch className="w-3.5 h-3.5" /> Tree
+                  </button>
+                  <button
+                    onClick={() => setHomeView('table')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      homeView === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <LayoutList className="w-3.5 h-3.5" /> Table
+                  </button>
+                </div>
               </div>
             </div>
 

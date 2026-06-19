@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { BookOpen, Plus, LayoutList, GitBranch, Edit2, LogOut } from 'lucide-react';
+import { BookOpen, Plus, LayoutList, GitBranch, Edit2, LogOut, ClipboardList } from 'lucide-react';
 import { SubjectArea, Entity, DataItem } from './types';
 import { LandingPage } from './LandingPage';
 import { ApproverPortal } from './ApproverPortal';
@@ -13,6 +13,9 @@ import { CreateModal } from './components/modals/CreateModal';
 import { EditModal } from './components/modals/EditModal';
 import { useCatalog } from './hooks/useCatalog';
 import { countEntities, countDataItems, countMatches } from './lib/catalog';
+import { CURRENT_BOARD_MEMBER } from './lib/constants';
+import { RequestCard } from './components/RequestCard';
+import { TypeLegend } from './lib/badges';
 import { Toaster } from 'sonner';
 
 type Role = 'selection' | 'board' | 'approver';
@@ -34,6 +37,8 @@ export default function App() {
     approve, reject,
   } = useCatalog();
   const [activeTab, setActiveTab] = useState<Tab>('tree');
+  const [boardTab, setBoardTab] = useState<'catalog' | 'requests'>('catalog');
+  const [myReqFilter, setMyReqFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -52,7 +57,15 @@ export default function App() {
   // ── Stats ────────────────────────────────────────────────────
   const totalEntities = countEntities(subjectAreas);
   const totalDataItems = countDataItems(subjectAreas);
-  const pendingCount = requests.filter(r => r.status === 'pending').length;
+  // Board members track *their own* submissions, not the global queue.
+  const myRequests = useMemo(() => requests.filter(r => r.submittedBy === CURRENT_BOARD_MEMBER), [requests]);
+  const myPendingCount = myRequests.filter(r => r.status === 'pending').length;
+  const myApprovedCount = myRequests.filter(r => r.status === 'approved').length;
+  const myRejectedCount = myRequests.filter(r => r.status === 'rejected').length;
+  const myFilteredRequests = useMemo(
+    () => myRequests.filter(r => r.status === myReqFilter).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
+    [myRequests, myReqFilter],
+  );
   const treeMatchCount = useMemo(() => countMatches(subjectAreas, searchQuery), [subjectAreas, searchQuery]);
 
   // ── Role routing ─────────────────────────────────────────────
@@ -94,22 +107,26 @@ export default function App() {
               </div>
             </div>
 
+            {/* Portal tabs — Catalog browse vs the member's own submitted requests */}
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
               <button
-                onClick={() => setActiveTab('tree')}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'tree' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                onClick={() => setBoardTab('catalog')}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  boardTab === 'catalog' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
-                <GitBranch className="w-3.5 h-3.5" /> Tree View
+                Catalog
               </button>
               <button
-                onClick={() => setActiveTab('table')}
+                onClick={() => setBoardTab('requests')}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  boardTab === 'requests' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
-                <LayoutList className="w-3.5 h-3.5" /> Table View
+                <ClipboardList className="w-3.5 h-3.5" /> My Requests
+                {myPendingCount > 0 && (
+                  <span className="w-4 h-4 bg-amber-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{myPendingCount}</span>
+                )}
               </button>
             </div>
 
@@ -119,12 +136,6 @@ export default function App() {
                 <span><span className="font-semibold text-gray-800">{totalEntities}</span> Entities</span>
                 <span><span className="font-semibold text-gray-800">{totalDataItems}</span> Data Items</span>
               </div>
-              {pendingCount > 0 && (
-                <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
-                  <span className="w-4 h-4 bg-amber-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{pendingCount}</span>
-                  pending approval
-                </div>
-              )}
               <button
                 onClick={() => setModal({ type: 'edit' })}
                 className="flex items-center gap-1.5 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 border border-gray-200 transition-colors shadow-sm"
@@ -159,49 +170,121 @@ export default function App() {
 
       {/* Main */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-6 py-5 flex flex-col gap-5">
-        <SearchBar
-          value={searchQuery}
-          onChange={setSearchQuery}
-          onAdvancedSearch={() => setModal({ type: 'advancedSearch' })}
-          resultCount={searchQuery.trim() ? treeMatchCount : undefined}
-          totalCount={totalDataItems}
-        />
+        {boardTab === 'catalog' && (
+          <>
+            <SearchBar
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onAdvancedSearch={() => setModal({ type: 'advancedSearch' })}
+              resultCount={searchQuery.trim() ? treeMatchCount : undefined}
+              totalCount={totalDataItems}
+            />
 
-        {activeTab === 'tree' && (
-          <div className="flex items-center justify-between -mb-2">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-700">Data Hierarchy</h2>
-              <p className="text-xs text-gray-400 mt-0.5">Click an Entity or Data Item to view details</p>
+            <div className="flex items-center justify-between -mb-2 gap-4">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-gray-700">
+                  {activeTab === 'tree' ? 'Data Hierarchy' : 'All Data Items'}
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {activeTab === 'tree'
+                    ? 'Click an Entity or Data Item to view details'
+                    : 'Sorted by last updated · Click any row for details · Entity link opens entity view'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                {activeTab === 'tree' && <TypeLegend className="hidden lg:flex" />}
+                {/* Tree / Table toggle — inline with the section it controls */}
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setActiveTab('tree')}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      activeTab === 'tree' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <GitBranch className="w-3.5 h-3.5" /> Tree View
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('table')}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      activeTab === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <LayoutList className="w-3.5 h-3.5" /> Table View
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-xs text-gray-400">
-              <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-blue-600 rounded-full" />Subject Area</div>
-              <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-purple-600 rounded-full" />Entity</div>
-              <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-green-500 rounded-full" />Data Item</div>
-            </div>
-          </div>
-        )}
-        {activeTab === 'table' && (
-          <div className="-mb-2">
-            <h2 className="text-sm font-semibold text-gray-700">All Data Items</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Sorted by last updated · Click any row for details · Entity link opens entity view</p>
-          </div>
+
+            {activeTab === 'tree' && (
+              <TreeView
+                subjectAreas={subjectAreas}
+                searchQuery={searchQuery}
+                onEntityClick={openEntity}
+                onDataItemClick={openDataItem}
+              />
+            )}
+            {activeTab === 'table' && (
+              <TableView
+                subjectAreas={subjectAreas}
+                searchQuery={searchQuery}
+                onDataItemClick={openDataItem}
+                onEntityClick={openEntity}
+              />
+            )}
+          </>
         )}
 
-        {activeTab === 'tree' && (
-          <TreeView
-            subjectAreas={subjectAreas}
-            searchQuery={searchQuery}
-            onEntityClick={openEntity}
-            onDataItemClick={openDataItem}
-          />
-        )}
-        {activeTab === 'table' && (
-          <TableView
-            subjectAreas={subjectAreas}
-            searchQuery={searchQuery}
-            onDataItemClick={openDataItem}
-            onEntityClick={openEntity}
-          />
+        {boardTab === 'requests' && (
+          <div className="flex flex-col gap-5 pb-12">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-gray-900">My Requests</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Track the status of the changes you submitted for approval</p>
+              </div>
+              <div className="flex items-center gap-4 text-sm text-gray-500 flex-shrink-0">
+                <span><span className="font-semibold text-amber-600">{myPendingCount}</span> pending</span>
+                <span><span className="font-semibold text-emerald-600">{myApprovedCount}</span> approved</span>
+                <span><span className="font-semibold text-red-600">{myRejectedCount}</span> rejected</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {(['pending', 'approved', 'rejected'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setMyReqFilter(f)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
+                    myReqFilter === f
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  {f}
+                  {f === 'pending' && myPendingCount > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">{myPendingCount}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {myFilteredRequests.length === 0 ? (
+              <div className="text-center py-20 text-gray-400">
+                <ClipboardList className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                <div className="text-sm font-medium capitalize">No {myReqFilter} requests</div>
+                <div className="text-xs mt-1">
+                  {myReqFilter === 'pending'
+                    ? 'Nothing awaiting approval — use Create or Edit to submit a change'
+                    : `You have no ${myReqFilter} requests yet`}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {myFilteredRequests.map(r => (
+                  <RequestCard key={r.id} request={r} readOnly onApprove={() => {}} onReject={() => {}} />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </main>
 

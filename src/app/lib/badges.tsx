@@ -178,3 +178,17 @@ export function OperationBadge({ operation, className = '' }: { operation: Opera
     </span>
   );
 }
+
+// ── Type legend — the colour key for the Data Hierarchy ──
+//
+// One component used in both portals so the catalog's colour coding (matching
+// RecordTypeIcon's hues) reads identically and can't drift.
+export function TypeLegend({ className = '' }: { className?: string }) {
+  return (
+    <div className={`flex items-center gap-3 text-xs text-gray-400 ${className}`}>
+      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-600" />Subject Area</span>
+      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-600" />Entity</span>
+      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500" />Data Item</span>
+    </div>
+  );
+}
