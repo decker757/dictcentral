@@ -14,8 +14,9 @@ import { EditModal } from './components/modals/EditModal';
 import { useCatalog } from './hooks/useCatalog';
 import { countEntities, countDataItems, countMatches } from './lib/catalog';
 import { CURRENT_BOARD_MEMBER } from './lib/constants';
-import { RequestCard } from './components/RequestCard';
+import { RequestGroupList } from './components/shared/RequestGroupList';
 import { TypeLegend } from './lib/badges';
+import { groupRequestsBySubjectArea } from './lib/requestGroups';
 import { Toaster } from 'sonner';
 
 type Role = 'selection' | 'board' | 'approver';
@@ -39,6 +40,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [boardTab, setBoardTab] = useState<'catalog' | 'requests'>('catalog');
   const [myReqFilter, setMyReqFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [boardCollapsedGroups, setBoardCollapsedGroups] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -66,6 +68,13 @@ export default function App() {
     () => myRequests.filter(r => r.status === myReqFilter).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
     [myRequests, myReqFilter],
   );
+  const myGroups = useMemo(() => groupRequestsBySubjectArea(myFilteredRequests), [myFilteredRequests]);
+  const toggleBoardGroup = (name: string) =>
+    setBoardCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
   const treeMatchCount = useMemo(() => countMatches(subjectAreas, searchQuery), [subjectAreas, searchQuery]);
 
   // ── Role routing ─────────────────────────────────────────────
@@ -278,11 +287,13 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-3">
-                {myFilteredRequests.map(r => (
-                  <RequestCard key={r.id} request={r} readOnly onApprove={() => {}} onReject={() => {}} />
-                ))}
-              </div>
+              <RequestGroupList
+                groups={myGroups}
+                subjectAreas={subjectAreas}
+                collapsedGroups={boardCollapsedGroups}
+                onToggleGroup={toggleBoardGroup}
+                readOnly
+              />
             )}
           </div>
         )}
