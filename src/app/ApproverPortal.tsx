@@ -396,26 +396,6 @@ export function ApproverPortal({
 
             {/* Right */}
             <div className="flex items-center gap-3">
-              {tab === 'home' && (
-                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setHomeView('tree')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      homeView === 'tree' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <GitBranch className="w-3.5 h-3.5" /> Tree
-                  </button>
-                  <button
-                    onClick={() => setHomeView('table')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      homeView === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <LayoutList className="w-3.5 h-3.5" /> Table
-                  </button>
-                </div>
-              )}
               <button
                 onClick={onLeave}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
@@ -439,15 +419,36 @@ export function ApproverPortal({
               totalCount={totalDataItems}
             />
 
-            <div className="-mb-2">
-              <h2 className="text-sm font-semibold text-gray-700">
-                {homeView === 'tree' ? 'Data Hierarchy' : 'All Data Items'}
-              </h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {homeView === 'tree'
-                  ? 'Read-only view · Expand an entity to browse its data items · click Details or a data item for full metadata'
-                  : 'Read-only view · Click any row to inspect its full metadata'}
-              </p>
+            <div className="-mb-2 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-gray-700">
+                  {homeView === 'tree' ? 'Data Hierarchy' : 'All Data Items'}
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {homeView === 'tree'
+                    ? 'Read-only view · Expand an entity to browse its data items · click Details or a data item for full metadata'
+                    : 'Read-only view · Click any row to inspect its full metadata'}
+                </p>
+              </div>
+              {/* Tree / Table toggle — inline with the section it controls */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
+                <button
+                  onClick={() => setHomeView('tree')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    homeView === 'tree' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <GitBranch className="w-3.5 h-3.5" /> Tree
+                </button>
+                <button
+                  onClick={() => setHomeView('table')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    homeView === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <LayoutList className="w-3.5 h-3.5" /> Table
+                </button>
+              </div>
             </div>
 
             {homeView === 'tree' && (
