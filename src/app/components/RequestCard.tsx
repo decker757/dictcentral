@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { CheckCircle, XCircle, Clock, Layers2, ChevronDown, ChevronRight, Lock, Database, FileText } from 'lucide-react';
+import { CheckCircle, Clock, Layers2, ChevronDown, ChevronRight } from 'lucide-react';
 import { ChangeRequest, Entity, DataItem } from '../types';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import { ENTITY_FIELDS } from '../lib/fieldSchema';
 import { formatValue, isEmptyValue, formatSubmittedAt } from '../lib/format';
-import { FieldRow, DiffGrid, DiffLegend, getRequestDiff } from './shared/DiffGrid';
+import { FieldRow, DiffGrid, getRequestDiff } from './shared/DiffGrid';
+import { RecordTypeIcon, OperationBadge } from '../lib/badges';
+import { ApproveButton, RejectButton } from './ui/ActionButton';
 
 // Re-exported for the documented public API (consumed by FocusModeView etc.).
 export { FieldRow } from './shared/DiffGrid';
@@ -28,7 +30,7 @@ export function RequestCard({
   disableApprove, disableApproveTooltip, isNested,
 }: RequestCardProps) {
   const diff = getRequestDiff(request);
-  const { isCreate, isEntity, changedSet, newFieldCount } = diff;
+  const { isCreate, isEntity, changedSet } = diff;
   const [viewMode, setViewMode] = useState<'full' | 'changes'>(isCreate ? 'full' : 'changes');
   const [expanded, setExpanded] = useState(false); // calm list — collapsed by default
 
@@ -65,10 +67,8 @@ export function RequestCard({
           </div>
         )}
 
-        {/* Type icon — Database = Entity, FileText = Data item (matches Tree/Table views) */}
-        <div className={`flex-shrink-0 mt-0.5 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center ${isNested ? 'w-7 h-7' : 'w-8 h-8'}`}>
-          {isEntity ? <Database className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-        </div>
+        {/* Type icon — purple Database = Entity, green FileText = Data item (matches the Data Hierarchy tree) */}
+        <RecordTypeIcon type={isEntity ? 'entity' : 'dataitem'} size={isNested ? 'sm' : 'md'} className="mt-0.5" />
 
         {/* Info — name + type + action chip, then context */}
         <button onClick={() => setExpanded(v => !v)} className="flex-1 min-w-0 text-left">
@@ -79,15 +79,7 @@ export function RequestCard({
             <span className="text-xs font-medium text-gray-400 flex-shrink-0">
               {isEntity ? 'Entity' : 'Data item'}
             </span>
-            {isCreate ? (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 flex-shrink-0">
-                Create · {newFieldCount} new
-              </span>
-            ) : (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0">
-                Edit{changedSet.size > 0 ? ` · ${changedSet.size} changed` : ''}
-              </span>
-            )}
+            <OperationBadge operation={isCreate ? 'create' : 'edit'} className="flex-shrink-0" />
           </div>
           <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-1 flex-wrap">
             {/* Entity context only when not visually nested (the rail/header already shows it) */}
@@ -118,17 +110,7 @@ export function RequestCard({
                 <TooltipPrimitive.Root delayDuration={200}>
                   <TooltipPrimitive.Trigger asChild>
                     <span className="inline-block">
-                      <button
-                        onClick={() => onApprove(request.id)}
-                        disabled={disableApprove}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                          disableApprove
-                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                        }`}
-                      >
-                        {disableApprove ? <Lock className="w-3.5 h-3.5" /> : <CheckCircle className="w-3.5 h-3.5" />} Approve
-                      </button>
+                      <ApproveButton onClick={() => onApprove(request.id)} locked={disableApprove} />
                     </span>
                   </TooltipPrimitive.Trigger>
                   {disableApprove && disableApproveTooltip && (
@@ -145,12 +127,7 @@ export function RequestCard({
                 </TooltipPrimitive.Root>
               </TooltipPrimitive.Provider>
 
-              <button
-                onClick={() => onReject(request.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-red-600 text-xs font-semibold rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
-              >
-                <XCircle className="w-3.5 h-3.5" /> Reject
-              </button>
+              <RejectButton onClick={() => onReject(request.id)} />
             </>
           )}
 
@@ -205,8 +182,6 @@ export function RequestCard({
                 </span>
               )}
             </div>
-
-            <DiffLegend />
           </div>
 
           <DiffGrid diff={diff} mode={viewMode} />
@@ -229,9 +204,7 @@ export function EntityViewCard({ entity, childCount }: { entity: Entity; childCo
         onClick={() => setExpanded(v => !v)}
         className="w-full text-left px-5 py-2.5 flex items-center gap-3 hover:bg-gray-100/70 transition-colors"
       >
-        <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-400 flex items-center justify-center flex-shrink-0">
-          <Database className="w-4 h-4" />
-        </div>
+        <RecordTypeIcon type="entity" size="md" muted />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-gray-700">{entity.name}</span>

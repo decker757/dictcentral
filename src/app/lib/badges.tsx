@@ -5,7 +5,7 @@
 // Class strings here are FULL LITERALS (not template-constructed) so Tailwind v4's
 // content scanner keeps them in the build.
 
-import { Shield, Lock, Key } from 'lucide-react';
+import { Shield, Lock, Key, Layers, Database, FileText, Plus, Pencil, Trash2, type LucideIcon } from 'lucide-react';
 
 type Tone = 'solid' | 'subtle';
 
@@ -86,6 +86,95 @@ export function KeyBadge({ value, size = 'sm', className = '' }: { value: string
   return (
     <span className={`inline-flex items-center gap-0.5 font-semibold rounded border ${sizing} ${keyIndicatorBadgeClass(value)} ${className}`}>
       <Key className={icon} />{value}
+    </span>
+  );
+}
+
+// ── Record-type icon (Subject Area · Entity · Data item) ──
+//
+// ONE component for every surface that labels a record by type, so the catalog
+// tree and the change-request queue read identically and the styling lives in a
+// single place — change it here, it changes everywhere. Mirrors the Data
+// Hierarchy tree: Subject Area = blue · Entity = purple · Data item = green.
+// Type is also signalled by the glyph (Layers / Database / FileText) and a nearby
+// text label, so color is reinforcement, never the only cue. Data items use
+// `green` (not `emerald`) to stay distinct from the emerald create/approve action
+// color in the request queue. Class strings are full literals for Tailwind v4.
+
+export type RecordTypeKey = 'subjectArea' | 'entity' | 'dataitem';
+
+const RECORD_TYPE_GLYPH: Record<RecordTypeKey, LucideIcon> = {
+  subjectArea: Layers, entity: Database, dataitem: FileText,
+};
+// Boxed accent — filled/tinted tile (bg + glyph color).
+const RECORD_TYPE_BOX: Record<RecordTypeKey, string> = {
+  subjectArea: 'bg-blue-600 text-white',
+  entity:      'bg-purple-100 text-purple-600',
+  dataitem:    'bg-green-100 text-green-600',
+};
+// Muted boxed accent — for an unchanged entity shown only as read-only context,
+// so it stays subordinate to the actionable rows nested beneath it.
+const RECORD_TYPE_BOX_MUTED: Record<RecordTypeKey, string> = {
+  subjectArea: 'bg-blue-50 text-blue-400',
+  entity:      'bg-purple-50 text-purple-400',
+  dataitem:    'bg-green-50 text-green-400',
+};
+// Boxless accent — bare glyph color, for tight inline rows (e.g. tree data item).
+const RECORD_TYPE_TEXT: Record<RecordTypeKey, string> = {
+  subjectArea: 'text-blue-600', entity: 'text-purple-600', dataitem: 'text-green-600',
+};
+
+type IconSize = 'xs' | 'sm' | 'md' | 'lg';
+const BOX_SIZE: Record<IconSize, string> = {
+  xs: 'w-6 h-6', sm: 'w-7 h-7', md: 'w-8 h-8', lg: 'w-9 h-9',
+};
+const GLYPH_SIZE: Record<IconSize, string> = {
+  xs: 'w-3 h-3', sm: 'w-3.5 h-3.5', md: 'w-4 h-4', lg: 'w-5 h-5',
+};
+
+export function RecordTypeIcon({
+  type, size = 'md', muted = false, boxless = false, className = '',
+}: {
+  type: RecordTypeKey;
+  size?: IconSize;
+  /** Lower-emphasis tint — for read-only context (an unchanged entity). */
+  muted?: boolean;
+  /** Bare glyph, no tile — for tight inline rows. */
+  boxless?: boolean;
+  className?: string;
+}) {
+  const Glyph = RECORD_TYPE_GLYPH[type];
+  if (boxless) {
+    return <Glyph className={`${GLYPH_SIZE[size]} ${RECORD_TYPE_TEXT[type]} flex-shrink-0 ${className}`} />;
+  }
+  const color = muted ? RECORD_TYPE_BOX_MUTED[type] : RECORD_TYPE_BOX[type];
+  return (
+    <span className={`inline-flex items-center justify-center rounded-lg flex-shrink-0 ${BOX_SIZE[size]} ${color} ${className}`}>
+      <Glyph className={GLYPH_SIZE[size]} />
+    </span>
+  );
+}
+
+// ── Operation badge (Create · Edit · Delete) ──
+//
+// Signals what KIND of change a request is — by color AND icon, so the operation
+// reads at a glance without a field counter (the diff grid shows the specifics on
+// expand). Plus/green = additive (create), pencil/amber = modify (edit),
+// trash/red = removal (delete). Mirrors the semantic palette in CLAUDE.md.
+
+export type Operation = 'create' | 'edit' | 'delete';
+
+const OPERATION_BADGE: Record<Operation, { label: string; cls: string; Icon: LucideIcon }> = {
+  create: { label: 'Create', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: Plus },
+  edit:   { label: 'Edit',   cls: 'bg-amber-50 text-amber-700 border-amber-200',        Icon: Pencil },
+  delete: { label: 'Delete', cls: 'bg-red-50 text-red-700 border-red-200',              Icon: Trash2 },
+};
+
+export function OperationBadge({ operation, className = '' }: { operation: Operation; className?: string }) {
+  const { label, cls, Icon } = OPERATION_BADGE[operation];
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cls} ${className}`}>
+      <Icon className="w-3 h-3" strokeWidth={2.5} />{label}
     </span>
   );
 }

@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import {
-  CheckCircle, XCircle, ChevronLeft, SkipForward, X, Clock, CheckCheck, Info, Database, FileText,
+  ChevronLeft, SkipForward, X, Clock, CheckCheck, Info,
 } from 'lucide-react';
 import { ChangeRequest, Entity, DataItem } from '../types';
 import { formatSubmittedAt } from '../lib/format';
-import { DiffGrid, DiffLegend, getRequestDiff } from './shared/DiffGrid';
+import { DiffGrid, getRequestDiff } from './shared/DiffGrid';
 import { RejectDialog } from './shared/RejectDialog';
+import { RecordTypeIcon, OperationBadge } from '../lib/badges';
+import { ApproveButton, RejectButton } from './ui/ActionButton';
 
 interface FocusModeViewProps {
   /** Frozen snapshot of pending request IDs captured when focus mode was entered. */
@@ -94,7 +96,7 @@ export function FocusModeView({
   }
 
   const diff = getRequestDiff(current);
-  const { isCreate, isEntity, changedSet, newFieldCount } = diff;
+  const { isCreate, isEntity, changedSet } = diff;
   const progress = total > 0 ? Math.round((currentIndex / total) * 100) : 0;
   const alreadyResolved = current.status !== 'pending';
 
@@ -124,21 +126,11 @@ export function FocusModeView({
       <div className="border border-gray-200 rounded-2xl bg-white shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center">
-              {isEntity ? <Database className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
-            </div>
+            <RecordTypeIcon type={isEntity ? 'entity' : 'dataitem'} size="lg" />
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium text-gray-400">{isEntity ? 'Entity' : 'Data item'}</span>
-                {isCreate ? (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    Create · {newFieldCount} new
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                    Edit{changedSet.size > 0 ? ` · ${changedSet.size} changed` : ''}
-                  </span>
-                )}
+                <OperationBadge operation={isCreate ? 'create' : 'edit'} />
                 {alreadyResolved && (
                   <span className={`px-2 py-0.5 rounded-md text-xs font-medium border capitalize ${current.status === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-600 border-red-200'}`}>
                     {current.status}
@@ -171,7 +163,6 @@ export function FocusModeView({
           <span className="text-xs text-gray-500">
             {isCreate ? 'All fields are new' : `${changedSet.size} field${changedSet.size !== 1 ? 's' : ''} changed`}
           </span>
-          <DiffLegend />
         </div>
 
         {/* Diff grid (scrollable) */}
@@ -186,13 +177,7 @@ export function FocusModeView({
 
         {/* Footer actions */}
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50">
-          <button
-            onClick={openReject}
-            disabled={alreadyResolved}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-red-500 text-white text-sm font-semibold rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <XCircle className="w-4 h-4" /> Reject
-          </button>
+          <RejectButton size="lg" variant="solid" onClick={openReject} disabled={alreadyResolved} />
 
           <div className="flex items-center gap-2">
             <button
@@ -210,13 +195,7 @@ export function FocusModeView({
             </button>
           </div>
 
-          <button
-            onClick={approveCurrent}
-            disabled={disableApprove || alreadyResolved}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <CheckCircle className="w-4 h-4" /> Approve
-          </button>
+          <ApproveButton size="lg" onClick={approveCurrent} locked={disableApprove} disabled={alreadyResolved} />
         </div>
       </div>
 

@@ -127,6 +127,12 @@ Color carries **exactly one meaning** (Nielsen #4 / consistency). When editing U
   components; do not re-add inline `switch (classification)` color maps. Class strings there are
   full literals on purpose (Tailwind v4 scans source for complete class names — never build them
   via template strings).
+- **Record-type icons (Subject Area = blue · Entity = purple · Data item = green) go through
+  `<RecordTypeIcon>` in `lib/badges.tsx`** — pass `type` + `size` (`xs`/`sm`/`md`/`lg`), plus
+  `muted` (read-only context) or `boxless` (bare glyph for tight inline rows). It owns the glyph
+  (`Layers`/`Database`/`FileText`), color, and tile, so the catalog tree and the request queue
+  can't drift; don't re-add inline `bg-purple-100`/`Database` icon boxes. (TableView's entity
+  link stays bespoke — it inherits its color for a hover-darken effect.)
 - Form inputs go through `ui/Field` (`TextField`/`SelectField`/`TextAreaField`); modal shells
   through `ui/Modal` (`Modal`/`ModalHeader`); option lists come from `lib/constants`.
 - `RequestCard` is collapsed by default; clicking a row expands its field diff grid.

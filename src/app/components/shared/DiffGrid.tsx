@@ -19,31 +19,22 @@ export function FieldRow({ label, value, isChanged, originalValue, isCreate }: F
   const originalDisplay = originalValue !== undefined ? formatValue(originalValue) : null;
   if (display === '—' && !isChanged) return null;
 
-  const bgClass = isChanged
-    ? isCreate ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'
-    : 'bg-gray-50';
-
-  const textClass = isChanged
-    ? isCreate ? 'text-emerald-700' : 'text-emerald-700 font-medium' // new value in green for edits
-    : 'text-gray-700';
+  // The OPERATION (create / edit / delete) belongs to the whole request — it's shown once on
+  // the request's badge — so it isn't re-stated on every field. Cards stay a calm neutral and
+  // color is spent only where it varies *per field*: the value change. The prior value is muted
+  // + struck through, the new value is green, so an edit reads as a real before → after.
+  const showTransition = isChanged && !isCreate && originalDisplay !== null && originalDisplay !== '—';
 
   return (
-    <div className={`flex gap-3 px-3 py-2 rounded-lg text-xs ${bgClass}`}>
-      <span className="text-gray-400 w-36 flex-shrink-0 pt-0.5">{label}</span>
-      <div className="flex-1 min-w-0">
-        {isChanged && !isCreate && originalDisplay && (
-          <div className="text-red-600 line-through mb-0.5 break-words">
-            {originalDisplay} <span className="text-gray-400 no-underline mx-1">→</span>
-          </div>
-        )}
-        <span className={`break-words ${textClass}`}>{display}</span>
-      </div>
-      {isChanged && (
-        <span className={`text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 pt-0.5 ${
-          isCreate ? 'text-emerald-600' : 'text-amber-600'
-        }`}>
-          {isCreate ? 'new' : 'changed'}
-        </span>
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+      <div className="text-[11px] font-medium text-gray-500 mb-1">{label}</div>
+      {showTransition ? (
+        <div className="space-y-0.5">
+          <div className="text-gray-400 line-through break-words">{originalDisplay}</div>
+          <div className="text-emerald-700 font-medium break-words">{display}</div>
+        </div>
+      ) : (
+        <span className={`break-words ${isChanged ? 'text-gray-800 font-medium' : 'text-gray-600'}`}>{display}</span>
       )}
     </div>
   );
@@ -75,16 +66,6 @@ export function visibleDiffFields(diff: RequestDiff, mode: 'full' | 'changes'): 
   return mode === 'changes' && !diff.isCreate
     ? diff.fields.filter(f => diff.changedSet.has(f.key as string))
     : diff.fields;
-}
-
-export function DiffLegend() {
-  return (
-    <div className="flex items-center gap-3 text-[10px] font-medium text-gray-500 uppercase tracking-wider">
-      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> New</span>
-      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Changed</span>
-      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> Removed</span>
-    </div>
-  );
 }
 
 export function DiffGrid({ diff, mode, className }: { diff: RequestDiff; mode: 'full' | 'changes'; className?: string }) {

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { BookOpen, CheckSquare, GitBranch, LayoutList, LogOut, Bell, Check, Search, Play, ChevronDown, ChevronRight, Database } from 'lucide-react';
+import { BookOpen, CheckSquare, GitBranch, LayoutList, LogOut, Bell, Check, Search, Play, ChevronDown, ChevronRight } from 'lucide-react';
 import { SubjectArea, Entity, DataItem, ChangeRequest } from './types';
 import { TreeView } from './components/TreeView';
 import { TableView } from './components/TableView';
@@ -11,6 +11,8 @@ import { RequestCard, EntityViewCard } from './components/RequestCard';
 import { FocusModeView } from './components/FocusModeView';
 import { RejectDialog } from './components/shared/RejectDialog';
 import { countDataItems, countMatches } from './lib/catalog';
+import { RecordTypeIcon } from './lib/badges';
+import { ApproveButton, RejectButton } from './components/ui/ActionButton';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import { toast } from 'sonner';
 
@@ -44,7 +46,7 @@ export function ApproverPortal({
   const [homeView, setHomeView] = useState<HomeView>('tree');
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
-  const [reqFilter, setReqFilter] = useState<'all' | 'pending' | 'resolved'>('pending');
+  const [reqFilter, setReqFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -62,13 +64,14 @@ export function ApproverPortal({
   const [rejectingIds, setRejectingIds] = useState<string[] | null>(null);
 
   const pending = requests.filter(r => r.status === 'pending');
-  const resolved = requests.filter(r => r.status !== 'pending');
+  const approved = requests.filter(r => r.status === 'approved');
+  const rejected = requests.filter(r => r.status === 'rejected');
 
   const displayRequests = useMemo(() => {
-    if (reqFilter === 'pending') return pending;
-    if (reqFilter === 'resolved') return resolved;
-    return requests;
-  }, [reqFilter, requests, pending, resolved]);
+    if (reqFilter === 'approved') return approved;
+    if (reqFilter === 'rejected') return rejected;
+    return pending;
+  }, [reqFilter, pending, approved, rejected]);
 
   // Apply list search + type + subject-area filters
   const filteredDisplayRequests = useMemo(() => {
@@ -329,9 +332,7 @@ export function ApproverPortal({
           <EntityViewCard entity={entity} childCount={n} />
         ) : (
           <div className="border border-gray-200 rounded-xl bg-gray-50/60 px-5 py-2.5 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-400 flex items-center justify-center flex-shrink-0">
-              <Database className="w-4 h-4" />
-            </div>
+            <RecordTypeIcon type="entity" size="md" muted />
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-gray-700">{block.entityName}</span>
@@ -442,7 +443,11 @@ export function ApproverPortal({
               <h2 className="text-sm font-semibold text-gray-700">
                 {homeView === 'tree' ? 'Data Hierarchy' : 'All Data Items'}
               </h2>
-              <p className="text-xs text-gray-400 mt-0.5">Read-only view · Click any item to inspect its full metadata</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {homeView === 'tree'
+                  ? 'Read-only view · Expand an entity to browse its data items · click Details or a data item for full metadata'
+                  : 'Read-only view · Click any row to inspect its full metadata'}
+              </p>
             </div>
 
             {homeView === 'tree' && (
@@ -475,7 +480,8 @@ export function ApproverPortal({
               </div>
               <div className="flex items-center gap-4 text-sm text-gray-500">
                 <span><span className="font-semibold text-amber-600">{pending.length}</span> pending</span>
-                <span><span className="font-semibold text-gray-700">{resolved.length}</span> resolved</span>
+                <span><span className="font-semibold text-emerald-600">{approved.length}</span> approved</span>
+                <span><span className="font-semibold text-red-600">{rejected.length}</span> rejected</span>
               </div>
             </div>
 
@@ -493,7 +499,7 @@ export function ApproverPortal({
                 {/* Filter pills + Review button */}
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-2">
-                    {(['pending', 'all', 'resolved'] as const).map(f => (
+                    {(['pending', 'approved', 'rejected'] as const).map(f => (
                       <button
                         key={f}
                         onClick={() => setReqFilter(f)}
@@ -516,9 +522,9 @@ export function ApproverPortal({
                   <button
                     onClick={enterFocusMode}
                     disabled={allDisplayPendingIds.length === 0}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center justify-center gap-2 h-9 px-4 bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
                   >
-                    <Play className="w-3.5 h-3.5" /> Review pending →
+                    <Play className="w-4 h-4" /> Review Pending
                   </button>
                 </div>
 
@@ -582,25 +588,39 @@ export function ApproverPortal({
                   </div>
                 )}
 
-                {/* Grouped list */}
+                {/* Grouped list — each subject area is a titled card (mirrors the Data Hierarchy) */}
                 <div className="flex flex-col gap-5">
                   {subjectAreaGroups.map(group => {
                     const collapsed = collapsedGroups.has(group.name);
                     return (
-                      <div key={group.name} className="flex flex-col gap-3">
+                      <div key={group.name} className="border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
                         <button
                           onClick={() => toggleGroup(group.name)}
-                          className="flex items-center gap-2 text-left group"
+                          className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-gray-50/60 transition-colors text-left group"
                         >
-                          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
-                          <span className="text-sm font-semibold text-gray-700">{group.name}</span>
-                          <span className="text-xs text-gray-400">
-                            {group.pendingCount} pending · {group.total} total
-                          </span>
+                          {/* Subject area = blue (matches the Data Hierarchy tree) */}
+                          <RecordTypeIcon type="subjectArea" size="md" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-gray-900">{group.name}</span>
+                              {group.pendingCount > 0 && (
+                                <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-amber-50 text-amber-700 border-amber-200">
+                                  {group.pendingCount} pending
+                                </span>
+                              )}
+                            </div>
+                            {/* Second line only when it adds info beyond the pending badge */}
+                            {group.total - group.pendingCount > 0 && (
+                              <div className="text-xs text-gray-500 mt-0.5">
+                                {group.total - group.pendingCount} resolved
+                              </div>
+                            )}
+                          </div>
+                          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform flex-shrink-0 ${collapsed ? '-rotate-90' : ''}`} />
                         </button>
 
                         {!collapsed && (
-                          <div className="flex flex-col gap-3">
+                          <div className="border-t border-gray-100 p-4 bg-gray-50/40 flex flex-col gap-3">
                             {group.blocks.map(block => renderBlock(block))}
                           </div>
                         )}
@@ -628,18 +648,12 @@ export function ApproverPortal({
               >
                 Clear
               </button>
-              <button
-                onClick={() => handleOpenRejectDialog(Array.from(selectedIds))}
-                className="px-5 py-2 bg-red-500 text-white text-sm font-semibold rounded-lg hover:bg-red-600 transition-colors shadow-sm"
-              >
+              <RejectButton size="md" variant="solid" onClick={() => handleOpenRejectDialog(Array.from(selectedIds))}>
                 Reject Selected
-              </button>
-              <button
-                onClick={handleBulkApprove}
-                className="px-5 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
-              >
+              </RejectButton>
+              <ApproveButton size="md" onClick={handleBulkApprove}>
                 Approve Selected
-              </button>
+              </ApproveButton>
             </div>
           </div>
         </div>
