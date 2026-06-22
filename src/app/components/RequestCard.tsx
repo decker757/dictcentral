@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { CheckCircle, Clock, Layers2, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle, Clock, Layers2, ChevronDown, ChevronRight, Minus } from 'lucide-react';
 import { ChangeRequest, Entity, DataItem } from '../types';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import { ENTITY_FIELDS } from '../lib/fieldSchema';
 import { formatValue, isEmptyValue, formatSubmittedAt } from '../lib/format';
-import { FieldRow, DiffGrid, getRequestDiff } from './shared/DiffGrid';
+import { FieldRow, DiffGrid, getRequestDiff, InlineChangePreview } from './shared/DiffGrid';
 import { RecordTypeIcon, OperationBadge } from '../lib/badges';
 import { ApproveButton, RejectButton } from './ui/ActionButton';
 
@@ -96,6 +96,9 @@ export function RequestCard({
             <Clock className="w-3 h-3" />
             <span>{formatSubmittedAt(request.submittedAt)}</span>
           </div>
+
+          {/* At-a-glance changes — visible on every row, no expand needed */}
+          <InlineChangePreview diff={diff} />
         </button>
 
         {/* Status + actions */}
@@ -195,31 +198,55 @@ export function RequestCard({
 
 // ── Read-only entity card — current properties in the same field-grid format ──
 
-export function EntityViewCard({ entity, childCount }: { entity: Entity; childCount: number }) {
+export function EntityViewCard({
+  entity, childCount, selectAllChecked, onToggleSelectAll,
+}: {
+  entity: Entity;
+  childCount: number;
+  /** Tri-state summary of this entity's pending child requests' selection. Omit (with onToggleSelectAll) to hide the control entirely — e.g. read-only views. */
+  selectAllChecked?: boolean | 'indeterminate';
+  onToggleSelectAll?: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const values = entity as unknown as Record<string, unknown>;
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50/60">
-      <button
-        type="button"
-        onClick={() => setExpanded(v => !v)}
-        className="w-full text-left px-5 py-2.5 flex items-center gap-3 hover:bg-gray-100/70 transition-colors"
-      >
-        <RecordTypeIcon type="entity" size="md" muted />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-gray-700">{entity.name}</span>
-            <span className="text-xs font-medium text-gray-400">Entity · unchanged</span>
+      <div className="flex items-center gap-3 px-5 py-2.5">
+        {onToggleSelectAll && (
+          <CheckboxPrimitive.Root
+            checked={selectAllChecked}
+            onCheckedChange={onToggleSelectAll}
+            aria-label={`Select all ${childCount} data item changes under ${entity.name}`}
+            className="w-4 h-4 rounded border border-gray-300 bg-white flex items-center justify-center flex-shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-blue-600 data-[state=indeterminate]:border-blue-600"
+          >
+            <CheckboxPrimitive.Indicator>
+              {selectAllChecked === 'indeterminate'
+                ? <Minus className="w-3 h-3 text-white" strokeWidth={3} />
+                : <CheckCircle className="w-3 h-3 text-white" strokeWidth={3} />}
+            </CheckboxPrimitive.Indicator>
+          </CheckboxPrimitive.Root>
+        )}
+        <button
+          type="button"
+          onClick={() => setExpanded(v => !v)}
+          className="flex-1 min-w-0 text-left flex items-center gap-3 hover:bg-gray-100/70 transition-colors rounded-lg -m-1 p-1"
+        >
+          <RecordTypeIcon type="entity" size="md" muted />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-gray-700">{entity.name}</span>
+              <span className="text-xs font-medium text-gray-400">Entity · unchanged</span>
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {childCount} data item change{childCount !== 1 ? 's' : ''} below · {expanded ? 'hide' : 'view'} current properties
+            </div>
           </div>
-          <div className="text-xs text-gray-400 mt-0.5">
-            {childCount} data item change{childCount !== 1 ? 's' : ''} below · {expanded ? 'hide' : 'view'} current properties
-          </div>
-        </div>
-        {expanded
-          ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-          : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-      </button>
+          {expanded
+            ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+        </button>
+      </div>
 
       {expanded && (
         <>

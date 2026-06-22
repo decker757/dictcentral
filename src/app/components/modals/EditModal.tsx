@@ -28,7 +28,7 @@ const DI_TEXT_FIELDS: [keyof DataItem, string][] = [
   ['steward', 'Data Steward'], ['sourceColumn', 'Source Column'],
 ];
 const ENTITY_TEXT_FIELDS: [keyof Entity, string][] = [
-  ['name', 'Entity Name'], ['physicalTableName', 'Physical Table Name'],
+  ['name', 'Entity Name'], ['technicalName', 'Technical Name'],
   ['owner', 'Owner'], ['steward', 'Data Steward'], ['sourceSystem', 'Source System'],
   ['recordCount', 'Record Count'], ['refreshFrequency', 'Refresh Frequency'],
   ['retentionPolicy', 'Retention Policy'], ['schemaVersion', 'Schema Version'], ['slaTarget', 'SLA Target'],
@@ -179,7 +179,7 @@ export function EditModal({ subjectAreas, onClose, onUpdateEntity, onUpdateDataI
                   <Database className="w-4 h-4 text-purple-500 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-800 group-hover:text-orange-700 transition-colors">{entity.name}</div>
-                    <div className="text-xs text-gray-400 font-mono mt-0.5">{entity.physicalTableName} · {subjectArea.name}</div>
+                    <div className="text-xs text-gray-400 font-mono mt-0.5">{entity.technicalName} · {subjectArea.name}</div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <span className={`px-1.5 py-0.5 rounded text-xs border ${classificationBadgeClass(entity.classification, 'subtle')}`}>
@@ -219,7 +219,7 @@ export function EditModal({ subjectAreas, onClose, onUpdateEntity, onUpdateDataI
               <SelectField label="Classification" ring="orange" density="compact" options={CLASSIFICATIONS} value={(diDraft.classification as string) ?? ''} onChange={v => setDIDraft(d => ({ ...d, classification: v as DataItem['classification'] }))} />
               <SelectField label="Sensitivity Level" ring="orange" density="compact" options={SENSITIVITY_LEVELS} value={(diDraft.sensitivityLevel as string) ?? ''} onChange={v => setDIDraft(d => ({ ...d, sensitivityLevel: v as DataItem['sensitivityLevel'] }))} />
               <SelectField label="Key Indicator" ring="orange" density="compact" placeholder="— None —" options={KEY_INDICATORS} value={(diDraft.keyIndicator as string) ?? ''} onChange={v => setDIDraft(d => ({ ...d, keyIndicator: (v || null) as DataItem['keyIndicator'] }))} />
-              <TextAreaField colSpan2 label="Business Definition" ring="orange" density="compact" value={(diDraft.businessDefinition as string) ?? ''} onChange={v => setDIDraft(d => ({ ...d, businessDefinition: v }))} />
+              <TextAreaField colSpan2 label="Business Definition" ring="orange" density="compact" value={(diDraft.description as string) ?? ''} onChange={v => setDIDraft(d => ({ ...d, description: v }))} />
               <TextField colSpan2 mono label="Validation Rule" ring="orange" density="compact" value={(diDraft.validationRule as string) ?? ''} onChange={v => setDIDraft(d => ({ ...d, validationRule: v }))} />
             </div>
           </div>

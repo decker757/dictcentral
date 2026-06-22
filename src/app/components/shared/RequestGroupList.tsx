@@ -2,7 +2,8 @@
 // data-item rails. Shared so the approver queue and the board member's
 // "My Requests" render identically; the only difference is read-only vs actionable.
 
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, CheckCircle, Minus } from 'lucide-react';
+import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import { ChangeRequest, Entity, SubjectArea } from '../../types';
 import { RequestCard, EntityViewCard } from '../RequestCard';
 import { RecordTypeIcon } from '../../lib/badges';
@@ -18,6 +19,8 @@ interface RequestGroupListProps {
   // ── Actionable (approver) wiring — ignored when readOnly ──
   selectedIds?: Set<string>;
   onToggleSelect?: (id: string) => void;
+  /** Select/deselect a whole batch of ids at once (e.g. "select all" under one unchanged entity). */
+  onSelectMany?: (ids: string[]) => void;
   isParentPendingNew?: (req: ChangeRequest) => boolean;
   onApprove?: (id: string) => void;
   onReject?: (id: string) => void;
@@ -25,9 +28,33 @@ interface RequestGroupListProps {
 
 const noop = () => {};
 
+/** Shared select-all checkbox (tri-state) for a batch of pending request ids. */
+function SelectAllCheckbox({
+  checked, onToggle, label,
+}: {
+  checked: boolean | 'indeterminate';
+  onToggle: () => void;
+  label: string;
+}) {
+  return (
+    <CheckboxPrimitive.Root
+      checked={checked}
+      onCheckedChange={onToggle}
+      aria-label={label}
+      className="w-4 h-4 rounded border border-gray-300 bg-white flex items-center justify-center flex-shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-blue-600 data-[state=indeterminate]:border-blue-600"
+    >
+      <CheckboxPrimitive.Indicator>
+        {checked === 'indeterminate'
+          ? <Minus className="w-3 h-3 text-white" strokeWidth={3} />
+          : <CheckCircle className="w-3 h-3 text-white" strokeWidth={3} />}
+      </CheckboxPrimitive.Indicator>
+    </CheckboxPrimitive.Root>
+  );
+}
+
 export function RequestGroupList({
   groups, subjectAreas, collapsedGroups, onToggleGroup, readOnly,
-  selectedIds, onToggleSelect, isParentPendingNew, onApprove, onReject,
+  selectedIds, onToggleSelect, onSelectMany, isParentPendingNew, onApprove, onReject,
 }: RequestGroupListProps) {
   const renderRequestCard = (request: ChangeRequest, isNested: boolean) => {
     if (readOnly) {
@@ -91,12 +118,38 @@ export function RequestGroupList({
         if (e) { entity = e; break; }
       }
     }
+
+    // "Select all" for every pending data item nested under this unchanged
+    // entity — hidden entirely in read-only views or when nothing's pending.
+    const pendingChildIds = !readOnly ? block.children.filter(c => c.status === 'pending').map(c => c.id) : [];
+    const selectedChildCount = pendingChildIds.filter(id => selectedIds?.has(id)).length;
+    const selectAllChecked: boolean | 'indeterminate' | undefined = pendingChildIds.length === 0
+      ? undefined
+      : selectedChildCount === 0 ? false
+      : selectedChildCount === pendingChildIds.length ? true
+      : 'indeterminate';
+    const handleToggleSelectAll = pendingChildIds.length > 0 && onSelectMany
+      ? () => onSelectMany(pendingChildIds)
+      : undefined;
+
     return (
       <div key={`ee-${block.entityName}`} className="flex flex-col">
         {entity ? (
-          <EntityViewCard entity={entity} childCount={n} />
+          <EntityViewCard
+            entity={entity}
+            childCount={n}
+            selectAllChecked={selectAllChecked}
+            onToggleSelectAll={handleToggleSelectAll}
+          />
         ) : (
           <div className="border border-gray-200 rounded-xl bg-gray-50/60 px-5 py-2.5 flex items-center gap-3">
+            {handleToggleSelectAll && selectAllChecked !== undefined && (
+              <SelectAllCheckbox
+                checked={selectAllChecked}
+                onToggle={handleToggleSelectAll}
+                label={`Select all ${n} data item changes under ${block.entityName}`}
+              />
+            )}
             <RecordTypeIcon type="entity" size="md" muted />
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">

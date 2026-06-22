@@ -24,7 +24,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
   const imp = useExcelImport(() => Math.floor(Math.random() * 40) + 5);
 
   const [entityForm, setEntityForm] = useState({
-    name: '', physicalTableName: '', description: '', owner: '', steward: '',
+    name: '', technicalName: '', description: '', owner: '', steward: '',
     sourceSystem: '', recordCount: '', refreshFrequency: 'Daily',
     classification: 'Internal', status: 'Active', retentionPolicy: '',
     schemaVersion: 'v1.0.0', slaTarget: '', subjectAreaId: subjectAreas[0]?.id ?? '',
@@ -33,7 +33,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
   const [diForm, setDiForm] = useState({
     name: '', technicalName: '', dataType: 'VARCHAR', length: '',
     nullable: 'yes', keyIndicator: '', classification: 'Internal',
-    sensitivityLevel: 'Low', businessDefinition: '', format: '',
+    sensitivityLevel: 'Low', description: '', format: '',
     defaultValue: '', validationRule: '', steward: '', sourceColumn: '',
     transformationLogic: '', entityId: '',
   });
@@ -47,7 +47,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
     onCreateEntity(entityForm.subjectAreaId, {
       id: `e-${Date.now()}`,
       name: entityForm.name,
-      physicalTableName: entityForm.physicalTableName || entityForm.name.toLowerCase().replace(/\s+/g, '_'),
+      technicalName: entityForm.technicalName || entityForm.name.toLowerCase().replace(/\s+/g, '_'),
       description: entityForm.description,
       owner: entityForm.owner, steward: entityForm.steward,
       sourceSystem: entityForm.sourceSystem,
@@ -76,7 +76,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
       keyIndicator: (diForm.keyIndicator || null) as DataItem['keyIndicator'],
       classification: diForm.classification as DataItem['classification'],
       sensitivityLevel: diForm.sensitivityLevel as DataItem['sensitivityLevel'],
-      businessDefinition: diForm.businessDefinition,
+      description: diForm.description,
       format: diForm.format || undefined,
       defaultValue: diForm.defaultValue || undefined,
       validationRule: diForm.validationRule || undefined,
@@ -84,7 +84,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
       sourceColumn: diForm.sourceColumn || undefined,
       transformationLogic: diForm.transformationLogic || undefined,
       allowedValues: [],
-      lastModified: new Date().toISOString().slice(0, 10),
+      lastUpdated: new Date().toISOString().slice(0, 10),
     });
     onClose();
   };
@@ -184,7 +184,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
             <SelectField label="Key Indicator" placeholder="— None —" options={KEY_INDICATORS} value={diForm.keyIndicator} onChange={v => setD('keyIndicator', v)} />
             <SelectField label="Classification" options={CLASSIFICATIONS} value={diForm.classification} onChange={v => setD('classification', v)} />
             <SelectField label="Sensitivity Level" options={SENSITIVITY_LEVELS} value={diForm.sensitivityLevel} onChange={v => setD('sensitivityLevel', v)} />
-            <TextAreaField colSpan2 label="Business Definition" value={diForm.businessDefinition} onChange={v => setD('businessDefinition', v)} />
+            <TextAreaField colSpan2 label="Business Definition" value={diForm.description} onChange={v => setD('description', v)} />
             <TextField label="Format / Pattern" value={diForm.format} onChange={v => setD('format', v)} />
             <TextField label="Default Value" value={diForm.defaultValue} onChange={v => setD('defaultValue', v)} />
             <TextField label="Data Steward" value={diForm.steward} onChange={v => setD('steward', v)} />
@@ -206,7 +206,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
               </select>
             </div>
             <TextField label="Entity Name" required value={entityForm.name} onChange={v => setE('name', v)} />
-            <TextField label="Physical Table Name" value={entityForm.physicalTableName} onChange={v => setE('physicalTableName', v)} />
+            <TextField label="Technical Name" value={entityForm.technicalName} onChange={v => setE('technicalName', v)} />
             <TextField label="Owner" value={entityForm.owner} onChange={v => setE('owner', v)} />
             <TextField label="Data Steward" value={entityForm.steward} onChange={v => setE('steward', v)} />
             <TextField label="Source System" value={entityForm.sourceSystem} onChange={v => setE('sourceSystem', v)} />

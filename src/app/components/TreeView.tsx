@@ -24,7 +24,7 @@ export function TreeView({ subjectAreas, searchQuery, onEntityClick, onDataItemC
               ...e,
               dataItems: e.dataItems.filter(di =>
                 di.name.toLowerCase().includes(q) ||
-                di.businessDefinition.toLowerCase().includes(q)
+                (di.description ?? '').toLowerCase().includes(q)
               ),
             }))
             .filter(e => e.dataItems.length > 0),
@@ -158,7 +158,7 @@ function EntityRow({
           <span className="text-sm font-semibold text-gray-800 group-hover:text-purple-700 transition-colors truncate">
             {entity.name}
           </span>
-          <code className="text-xs text-gray-400 font-mono truncate hidden lg:block ml-2">{entity.physicalTableName}</code>
+          <code className="text-xs text-gray-400 font-mono truncate hidden lg:block ml-2">{entity.technicalName}</code>
         </button>
 
         {/* Inspect — sits right next to the identity so the affordance is obvious, labelled so it's

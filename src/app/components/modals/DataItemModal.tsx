@@ -29,7 +29,7 @@ const EDIT_FIELDS: [keyof DataItem, string, boolean?][] = [
   ['validationRule', 'Validation Rule'],
   ['sourceColumn', 'Source Column', true],
   ['steward', 'Data Steward'],
-  ['lastModified', 'Last Modified'],
+  ['lastUpdated', 'Last Updated'],
   ['transformationLogic', 'Transformation Logic'],
 ];
 
@@ -113,11 +113,11 @@ export function DataItemModal({ dataItem: initialDI, entity, subjectArea, onClos
             <textarea
               className="w-full text-sm border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-green-400 resize-none"
               rows={3}
-              value={draft.businessDefinition}
-              onChange={e => setDraft(d => ({ ...d, businessDefinition: e.target.value }))}
+              value={draft.description ?? ''}
+              onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
             />
           ) : (
-            <p className="text-sm text-gray-700 leading-relaxed">{di.businessDefinition}</p>
+            <p className="text-sm text-gray-700 leading-relaxed">{di.description ?? '—'}</p>
           )}
         </div>
 
@@ -171,7 +171,7 @@ export function DataItemModal({ dataItem: initialDI, entity, subjectArea, onClos
               <MetaCell icon={<Code2 className="w-3.5 h-3.5" />} label="Format / Pattern" value={di.format ?? '—'} mono />
               <MetaCell icon={<CheckSquare className="w-3.5 h-3.5" />} label="Default Value" value={di.defaultValue ?? 'None'} mono />
               <MetaCell icon={<User className="w-3.5 h-3.5" />} label="Data Steward" value={di.steward ?? '—'} />
-              <MetaCell icon={<Clock className="w-3.5 h-3.5" />} label="Last Modified" value={di.lastModified ?? '—'} mono />
+              <MetaCell icon={<Clock className="w-3.5 h-3.5" />} label="Last Updated" value={di.lastUpdated ?? '—'} mono />
               <MetaCell icon={<GitBranch className="w-3.5 h-3.5" />} label="Source Column" value={di.sourceColumn ?? '—'} mono wide />
             </div>
           )}

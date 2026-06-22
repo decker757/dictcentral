@@ -33,7 +33,7 @@ export const countDataItems = (subjectAreas: SubjectArea[]): number =>
 export const matchesQuery = (dataItem: DataItem, query: string): boolean => {
   const q = query.toLowerCase().trim();
   if (!q) return true;
-  return dataItem.name.toLowerCase().includes(q) || dataItem.businessDefinition.toLowerCase().includes(q);
+  return dataItem.name.toLowerCase().includes(q) || (dataItem.description ?? '').toLowerCase().includes(q);
 };
 
 /** Count of data items matching the quick-search query across the catalog. */

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { BookOpen, CheckSquare, GitBranch, LayoutList, LogOut, Bell, Check, Search, Play } from 'lucide-react';
+import { BookOpen, CheckSquare, GitBranch, LayoutList, LogOut, Bell, Check, Search, Play, Rows3, Table2 } from 'lucide-react';
 import { SubjectArea, Entity, DataItem, ChangeRequest } from './types';
 import { TreeView } from './components/TreeView';
 import { TableView } from './components/TableView';
@@ -7,10 +7,12 @@ import { SearchBar } from './components/SearchBar';
 import { EntityModal } from './components/modals/EntityModal';
 import { DataItemModal } from './components/modals/DataItemModal';
 import { AdvancedSearchModal } from './components/modals/AdvancedSearchModal';
+import { RequestDetailModal } from './components/modals/RequestDetailModal';
 import { RequestGroupList } from './components/shared/RequestGroupList';
+import { HierarchyRequestTable } from './components/shared/HierarchyRequestTable';
 import { FocusModeView } from './components/FocusModeView';
 import { RejectDialog } from './components/shared/RejectDialog';
-import { countDataItems, countMatches } from './lib/catalog';
+import { countDataItems, countMatches, findEntityById } from './lib/catalog';
 import { TypeLegend } from './lib/badges';
 import { groupRequestsBySubjectArea } from './lib/requestGroups';
 import { ApproveButton, RejectButton } from './components/ui/ActionButton';
@@ -19,11 +21,13 @@ import { toast } from 'sonner';
 
 type Tab = 'home' | 'requests';
 type HomeView = 'tree' | 'table';
+type RequestsView = 'card' | 'table';
 
 type ModalState =
   | { type: 'entity'; entity: Entity; subjectArea: SubjectArea }
   | { type: 'dataItem'; dataItem: DataItem; entity: Entity; subjectArea: SubjectArea }
   | { type: 'advancedSearch' }
+  | { type: 'requestDetail'; request: ChangeRequest }
   | null;
 
 interface ApproverPortalProps {
@@ -50,6 +54,9 @@ export function ApproverPortal({
   const [listTypeFilter, setListTypeFilter] = useState<'all' | 'create' | 'edit'>('all');
   const [listSaFilter, setListSaFilter] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  // Requests tab: hierarchical Excel-style table (default) vs the grouped card view.
+  const [reqViewMode, setReqViewMode] = useState<RequestsView>('table');
 
   // Focus mode
   const [focusMode, setFocusMode] = useState(false);
@@ -80,6 +87,9 @@ export function ApproverPortal({
     });
   }, [displayRequests, listSearch, listTypeFilter, listSaFilter]);
 
+  // Hierarchical table view groups by subject area → parent entity → child
+  // data items (same grouping the card view uses), computed once below.
+
   const subjectAreaNames = useMemo(
     () => Array.from(new Set(requests.map(r => r.subjectAreaName))),
     [requests]
@@ -92,6 +102,11 @@ export function ApproverPortal({
     setModal({ type: 'entity', entity, subjectArea });
   const openDataItem = (dataItem: DataItem, entity: Entity, subjectArea: SubjectArea) =>
     setModal({ type: 'dataItem', dataItem, entity, subjectArea });
+  /** Hierarchy table's "unchanged entity" context row only has the Entity, not its SubjectArea — resolve it. */
+  const handleHierarchyEntityClick = (entity: Entity) => {
+    const found = findEntityById(subjectAreas, entity.id);
+    if (found) openEntity(found.entity, found.subjectArea);
+  };
 
   // ── Hierarchy & Guards ────────────────────────────────────────
 
@@ -144,6 +159,19 @@ export function ApproverPortal({
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setSelectedIds(next);
+  };
+
+  // Group-level "select all" (e.g. every data item under one unchanged
+  // entity, or every row in one table): if every id in the group is already
+  // selected, clear just those; otherwise add all of them to the selection.
+  const toggleSelectMany = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const allSelected = ids.every(id => selectedIds.has(id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => allSelected ? next.delete(id) : next.add(id));
+      return next;
+    });
   };
 
   const toggleGroup = (name: string) => {
@@ -374,7 +402,7 @@ export function ApproverPortal({
               />
             ) : (
               <>
-                {/* Filter pills + Review button */}
+                {/* Filter pills + view toggle + Review button */}
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-2">
                     {(['pending', 'approved', 'rejected'] as const).map(f => (
@@ -397,13 +425,35 @@ export function ApproverPortal({
                     ))}
                   </div>
 
-                  <button
-                    onClick={enterFocusMode}
-                    disabled={allDisplayPendingIds.length === 0}
-                    className="inline-flex items-center justify-center gap-2 h-9 px-4 bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-                  >
-                    <Play className="w-4 h-4" /> Review Pending
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {/* Card / Table — table is the Excel-style scalable default */}
+                    <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                      <button
+                        onClick={() => setReqViewMode('card')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                          reqViewMode === 'card' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <Rows3 className="w-3.5 h-3.5" /> Card
+                      </button>
+                      <button
+                        onClick={() => setReqViewMode('table')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                          reqViewMode === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <Table2 className="w-3.5 h-3.5" /> Table
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={enterFocusMode}
+                      disabled={allDisplayPendingIds.length === 0}
+                      className="inline-flex items-center justify-center gap-2 h-9 px-4 bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+                    >
+                      <Play className="w-4 h-4" /> Review Pending
+                    </button>
+                  </div>
                 </div>
 
                 {/* Search + type + subject-area filters + select all */}
@@ -466,18 +516,35 @@ export function ApproverPortal({
                   </div>
                 )}
 
-                {/* Grouped list — shared with the board's My Requests for consistency */}
-                <RequestGroupList
-                  groups={subjectAreaGroups}
-                  subjectAreas={subjectAreas}
-                  collapsedGroups={collapsedGroups}
-                  onToggleGroup={toggleGroup}
-                  selectedIds={selectedIds}
-                  onToggleSelect={toggleSelect}
-                  isParentPendingNew={isParentPendingNew}
-                  onApprove={handleSingleApprove}
-                  onReject={(id) => handleOpenRejectDialog([id])}
-                />
+                {filteredDisplayRequests.length > 0 && reqViewMode === 'table' && (
+                  <HierarchyRequestTable
+                    groups={subjectAreaGroups}
+                    subjectAreas={subjectAreas}
+                    selectedIds={selectedIds}
+                    onToggleSelect={toggleSelect}
+                    onSelectMany={toggleSelectMany}
+                    onApprove={handleSingleApprove}
+                    onReject={(id) => handleOpenRejectDialog([id])}
+                    onRowClick={(req) => setModal({ type: 'requestDetail', request: req })}
+                    onEntityClick={handleHierarchyEntityClick}
+                    isParentPendingNew={isParentPendingNew}
+                  />
+                )}
+
+                {filteredDisplayRequests.length > 0 && reqViewMode === 'card' && (
+                  <RequestGroupList
+                    groups={subjectAreaGroups}
+                    subjectAreas={subjectAreas}
+                    collapsedGroups={collapsedGroups}
+                    onToggleGroup={toggleGroup}
+                    selectedIds={selectedIds}
+                    onToggleSelect={toggleSelect}
+                    onSelectMany={toggleSelectMany}
+                    isParentPendingNew={isParentPendingNew}
+                    onApprove={handleSingleApprove}
+                    onReject={(id) => handleOpenRejectDialog([id])}
+                  />
+                )}
               </>
             )}
           </div>
@@ -557,6 +624,12 @@ export function ApproverPortal({
           onDataItemClick={(di, e, sa) => { setModal(null); setTimeout(() => openDataItem(di, e, sa), 50); }}
           onEntityClick={(e, sa) => { setModal(null); setTimeout(() => openEntity(e, sa), 50); }}
           initialFilters={searchQuery ? { businessName: searchQuery } : undefined}
+        />
+      )}
+      {modal?.type === 'requestDetail' && (
+        <RequestDetailModal
+          request={modal.request}
+          onClose={() => setModal(null)}
         />
       )}
     </div>

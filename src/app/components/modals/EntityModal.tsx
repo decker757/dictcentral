@@ -21,7 +21,7 @@ interface EntityModalProps {
 
 // Editable text fields shown in the "Technical Metadata" grid (edit mode).
 const EDIT_FIELDS: [string, keyof Entity][] = [
-  ['Physical Table Name', 'physicalTableName'],
+  ['Technical Name', 'technicalName'],
   ['Owner', 'owner'],
   ['Data Steward', 'steward'],
   ['Source System', 'sourceSystem'],
@@ -42,7 +42,7 @@ export function EntityModal({ entity: initialEntity, subjectArea, onClose, onDat
   // Reflect live updates while modal is open
   const entity = editing ? draft : initialEntity;
 
-  const statusColor = (s: string) => {
+  const statusColor = (s?: string) => {
     switch (s) {
       case 'Active': return 'bg-green-100 text-green-700 border-green-200';
       case 'Deprecated': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
@@ -92,7 +92,7 @@ export function EntityModal({ entity: initialEntity, subjectArea, onClose, onDat
                   {subjectArea.name}
                 </span>
                 <span className={`px-2 py-0.5 rounded-md text-xs font-medium border ${statusColor(entity.status)}`}>
-                  <Activity className="w-3 h-3 inline mr-1" />{entity.status}
+                  <Activity className="w-3 h-3 inline mr-1" />{entity.status ?? 'Active'}
                 </span>
                 <span className={`px-2 py-0.5 rounded-md text-xs font-medium border ${classificationBadgeClass(entity.classification, 'solid')}`}>
                   <Shield className="w-3 h-3 inline mr-1" />{entity.classification}
@@ -158,12 +158,12 @@ export function EntityModal({ entity: initialEntity, subjectArea, onClose, onDat
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-x-6 gap-y-3">
-              <MetaCell icon={<Database className="w-3.5 h-3.5" />} label="Physical Table" value={entity.physicalTableName} mono />
-              <MetaCell icon={<User className="w-3.5 h-3.5" />} label="Owner" value={entity.owner} />
+              <MetaCell icon={<Database className="w-3.5 h-3.5" />} label="Technical Name" value={entity.technicalName} mono />
+              <MetaCell icon={<User className="w-3.5 h-3.5" />} label="Owner" value={entity.owner ?? '—'} />
               <MetaCell icon={<User className="w-3.5 h-3.5" />} label="Data Steward" value={entity.steward ?? '—'} />
-              <MetaCell icon={<Database className="w-3.5 h-3.5" />} label="Source System" value={entity.sourceSystem} />
-              <MetaCell icon={<Hash className="w-3.5 h-3.5" />} label="Record Count" value={entity.recordCount} mono />
-              <MetaCell icon={<RefreshCw className="w-3.5 h-3.5" />} label="Refresh Frequency" value={entity.refreshFrequency} />
+              <MetaCell icon={<Database className="w-3.5 h-3.5" />} label="Source System" value={entity.sourceSystem ?? '—'} />
+              <MetaCell icon={<Hash className="w-3.5 h-3.5" />} label="Record Count" value={entity.recordCount ?? '—'} mono />
+              <MetaCell icon={<RefreshCw className="w-3.5 h-3.5" />} label="Refresh Frequency" value={entity.refreshFrequency ?? '—'} />
               <MetaCell icon={<Archive className="w-3.5 h-3.5" />} label="Retention Policy" value={entity.retentionPolicy ?? '—'} />
               <MetaCell icon={<GitBranch className="w-3.5 h-3.5" />} label="Schema Version" value={entity.schemaVersion ?? '—'} mono />
               <MetaCell icon={<Star className="w-3.5 h-3.5" />} label="SLA Target" value={entity.slaTarget ?? '—'} />
@@ -187,11 +187,11 @@ export function EntityModal({ entity: initialEntity, subjectArea, onClose, onDat
           )}
 
           {/* Tags */}
-          {entity.tags.length > 0 && !editing && (
+          {(entity.tags ?? []).length > 0 && !editing && (
             <div className="flex items-center gap-2 mt-3">
               <Tag className="w-3.5 h-3.5 text-gray-400" />
               <div className="flex flex-wrap gap-1.5">
-                {entity.tags.map(t => (
+                {(entity.tags ?? []).map(t => (
                   <span key={t} className="px-2 py-0.5 bg-gray-100 border border-gray-200 text-gray-600 rounded text-xs">{t}</span>
                 ))}
               </div>

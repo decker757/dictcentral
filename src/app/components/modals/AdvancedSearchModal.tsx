@@ -10,7 +10,7 @@ import { ClassificationBadge, SensitivityBadge, KeyBadge } from '../../lib/badge
 export interface AdvancedFilters {
   businessName: string;
   technicalName: string;
-  businessDefinition: string;
+  description: string;
   dataType: string;
   classification: string;
   sensitivityLevel: string;
@@ -26,7 +26,7 @@ export interface AdvancedFilters {
 }
 
 const EMPTY_FILTERS: AdvancedFilters = {
-  businessName: '', technicalName: '', businessDefinition: '', dataType: '',
+  businessName: '', technicalName: '', description: '', dataType: '',
   classification: '', sensitivityLevel: '', keyIndicator: '', nullable: '',
   subjectAreaId: '', entityId: '', steward: '', format: '', sourceColumn: '',
   lastModifiedFrom: '', lastModifiedTo: '',
@@ -59,7 +59,7 @@ export function AdvancedSearchModal({ subjectAreas, onClose, onDataItemClick, on
       const f = filters;
       if (f.businessName && !dataItem.name.toLowerCase().includes(f.businessName.toLowerCase())) return false;
       if (f.technicalName && !dataItem.technicalName.toLowerCase().includes(f.technicalName.toLowerCase())) return false;
-      if (f.businessDefinition && !dataItem.businessDefinition.toLowerCase().includes(f.businessDefinition.toLowerCase())) return false;
+      if (f.description && !(dataItem.description ?? '').toLowerCase().includes(f.description.toLowerCase())) return false;
       if (f.dataType && dataItem.dataType !== f.dataType) return false;
       if (f.classification && dataItem.classification !== f.classification) return false;
       if (f.sensitivityLevel && dataItem.sensitivityLevel !== f.sensitivityLevel) return false;
@@ -74,8 +74,8 @@ export function AdvancedSearchModal({ subjectAreas, onClose, onDataItemClick, on
       if (f.steward && !(dataItem.steward ?? '').toLowerCase().includes(f.steward.toLowerCase())) return false;
       if (f.format && !(dataItem.format ?? '').toLowerCase().includes(f.format.toLowerCase())) return false;
       if (f.sourceColumn && !(dataItem.sourceColumn ?? '').toLowerCase().includes(f.sourceColumn.toLowerCase())) return false;
-      if (f.lastModifiedFrom && (dataItem.lastModified ?? '') < f.lastModifiedFrom) return false;
-      if (f.lastModifiedTo && (dataItem.lastModified ?? '') > f.lastModifiedTo) return false;
+      if (f.lastModifiedFrom && (dataItem.lastUpdated ?? '') < f.lastModifiedFrom) return false;
+      if (f.lastModifiedTo && (dataItem.lastUpdated ?? '') > f.lastModifiedTo) return false;
       return true;
     });
   }, [searched, filters, allDIs]);
@@ -108,7 +108,7 @@ export function AdvancedSearchModal({ subjectAreas, onClose, onDataItemClick, on
               <div className="space-y-3">
                 <TextField label="Business Name" placeholder="e.g. Patient ID" value={filters.businessName} onChange={v => set('businessName', v)} />
                 <TextField label="Technical Name" placeholder="e.g. patient_id" value={filters.technicalName} onChange={v => set('technicalName', v)} />
-                <TextField label="Definition Keywords" placeholder="keyword in definition" value={filters.businessDefinition} onChange={v => set('businessDefinition', v)} />
+                <TextField label="Definition Keywords" placeholder="keyword in definition" value={filters.description} onChange={v => set('description', v)} />
               </div>
             </div>
 
@@ -250,8 +250,8 @@ export function AdvancedSearchModal({ subjectAreas, onClose, onDataItemClick, on
                     <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
                       <ClassificationBadge value={dataItem.classification} tone="subtle" />
                       <SensitivityBadge value={dataItem.sensitivityLevel} />
-                      {dataItem.lastModified && (
-                        <span className="text-xs text-gray-400 font-mono">{dataItem.lastModified}</span>
+                      {dataItem.lastUpdated && (
+                        <span className="text-xs text-gray-400 font-mono">{dataItem.lastUpdated}</span>
                       )}
                     </div>
                   </button>

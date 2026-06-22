@@ -12,14 +12,14 @@ interface TableViewProps {
   onEntityClick: (entity: Entity, subjectArea: SubjectArea) => void;
 }
 
-type SortKey = 'name' | 'technicalName' | 'dataType' | 'classification' | 'sensitivityLevel' | 'entity' | 'subjectArea' | 'lastModified';
+type SortKey = 'name' | 'technicalName' | 'dataType' | 'classification' | 'sensitivityLevel' | 'entity' | 'subjectArea' | 'lastUpdated';
 type SortDir = 'asc' | 'desc';
 
 export function TableView({ subjectAreas, searchQuery, onDataItemClick, onEntityClick }: TableViewProps) {
   const [filterClass, setFilterClass] = useState('');
   const [filterSensitivity, setFilterSensitivity] = useState('');
   const [filterSubjectArea, setFilterSubjectArea] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('lastModified');
+  const [sortKey, setSortKey] = useState<SortKey>('lastUpdated');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   const allItems = useMemo<FlatDataItem[]>(() => flattenDataItems(subjectAreas), [subjectAreas]);
@@ -31,7 +31,7 @@ export function TableView({ subjectAreas, searchQuery, onDataItemClick, onEntity
     if (q) {
       items = items.filter(({ dataItem, entity, subjectArea }) =>
         dataItem.name.toLowerCase().includes(q) ||
-        dataItem.businessDefinition.toLowerCase().includes(q)
+        (dataItem.description ?? '').toLowerCase().includes(q)
       );
     }
     if (filterClass) items = items.filter(i => i.dataItem.classification === filterClass);
@@ -53,7 +53,7 @@ export function TableView({ subjectAreas, searchQuery, onDataItemClick, onEntity
         }
         case 'entity': av = a.entity.name; bv = b.entity.name; break;
         case 'subjectArea': av = a.subjectArea.name; bv = b.subjectArea.name; break;
-        case 'lastModified': av = a.dataItem.lastModified ?? ''; bv = b.dataItem.lastModified ?? ''; break;
+        case 'lastUpdated': av = a.dataItem.lastUpdated ?? ''; bv = b.dataItem.lastUpdated ?? ''; break;
       }
       const cmp = av.localeCompare(bv);
       return sortDir === 'asc' ? cmp : -cmp;
@@ -145,7 +145,7 @@ export function TableView({ subjectAreas, searchQuery, onDataItemClick, onEntity
                 <Th col="sensitivityLevel">Sensitivity</Th>
                 <Th col="entity">Parent Entity</Th>
                 <Th col="subjectArea">Subject Area</Th>
-                <Th col="lastModified">Last Modified</Th>
+                <Th col="lastUpdated">Last Modified</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -197,7 +197,7 @@ export function TableView({ subjectAreas, searchQuery, onDataItemClick, onEntity
                     <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{subjectArea.name}</span>
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className="text-xs text-gray-500 font-mono">{dataItem.lastModified ?? '—'}</span>
+                    <span className="text-xs text-gray-500 font-mono">{dataItem.lastUpdated ?? '—'}</span>
                   </td>
                 </tr>
               ))}

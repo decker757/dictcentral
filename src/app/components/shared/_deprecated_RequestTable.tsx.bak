@@ -1,0 +1,289 @@
+// Excel-style approval table — the scalable alternative to the card-based
+// RequestGroupList. One row per entity/data-item request, attributes as
+// columns, Business Name + Technical Name frozen on the left so context never
+// scrolls away. Entities and data items get separate tables (rendered by the
+// caller) because their attribute sets differ — DATAITEM_FIELDS has more
+// columns than ENTITY_FIELDS, and the table reads whichever schema applies
+// instead of hardcoding either shape.
+
+import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
+import { Check, ArrowRight } from 'lucide-react';
+import { ChangeRequest, Entity, DataItem } from '../../types';
+import { ENTITY_FIELDS, DATAITEM_FIELDS, FieldDef } from '../../lib/fieldSchema';
+import { formatValue, isEmptyValue, formatSubmittedAt } from '../../lib/format';
+import { getRequestDiff } from './DiffGrid';
+import { OperationBadge, RecordTypeIcon, RecordTypeKey } from '../../lib/badges';
+import { ApproveButton, RejectButton } from '../ui/ActionButton';
+
+type TableRecordType = 'entity' | 'dataitem';
+
+interface RequestTableProps {
+  requests: ChangeRequest[];
+  recordType: TableRecordType;
+  /** Hide any attribute column where not a single visible row has a change in it. */
+  changesOnly: boolean;
+  readOnly?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
+  /** Select/deselect every pending row in this table at once (header checkbox). */
+  onSelectMany?: (ids: string[]) => void;
+  onApprove?: (id: string) => void;
+  onReject?: (id: string) => void;
+  onRowClick: (request: ChangeRequest) => void;
+  isParentPendingNew?: (req: ChangeRequest) => boolean;
+}
+
+// "Business Name" / "Technical Name" are the same two frozen columns for both
+// object types, and now map to the same underlying field for both — Entities
+// and Data Items share one flat attribute schema (same import template).
+const FROZEN_KEY: Record<TableRecordType, { businessName: string; technicalName: string }> = {
+  entity: { businessName: 'name', technicalName: 'technicalName' },
+  dataitem: { businessName: 'name', technicalName: 'technicalName' },
+};
+
+const CHECKBOX_W = 36;
+const NAME_W = 200;
+const TECH_W = 170;
+const ACTIONS_W = 168;
+
+const STATUS_BADGE: Record<ChangeRequest['status'], string> = {
+  pending: 'bg-amber-50 text-amber-700 border-amber-200',
+  approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  rejected: 'bg-red-50 text-red-600 border-red-200',
+};
+
+/**
+ * One cell's value, with the established before → after language when it
+ * changed: previous value struck through, new value beside it with a solid
+ * highlight (background + border), per the "don't make me click to see what
+ * changed" requirement. Unchanged cells stay plain so changed cells pop.
+ */
+function FieldValueCell({
+  value, originalValue, isChanged, isCreate,
+}: { value: unknown; originalValue?: unknown; isChanged: boolean; isCreate: boolean }) {
+  const display = formatValue(value);
+  if (!isChanged) return <span className="text-gray-600">{display}</span>;
+
+  const originalDisplay = originalValue !== undefined ? formatValue(originalValue) : null;
+  const showTransition = !isCreate && originalDisplay !== null && originalDisplay !== '—' && originalDisplay !== display;
+
+  const newValue = (
+    <span className="inline-block text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+      {display}
+    </span>
+  );
+
+  if (!showTransition) return newValue;
+
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      <span className="text-gray-400 line-through">{originalDisplay}</span>
+      <ArrowRight className="w-3 h-3 text-gray-300 flex-shrink-0" />
+      {newValue}
+    </span>
+  );
+}
+
+export function RequestTable({
+  requests, recordType, changesOnly, readOnly,
+  selectedIds, onToggleSelect, onSelectMany, onApprove, onReject, onRowClick, isParentPendingNew,
+}: RequestTableProps) {
+  const fields = (recordType === 'entity' ? ENTITY_FIELDS : DATAITEM_FIELDS) as unknown as FieldDef<Record<string, unknown>>[];
+  const { businessName, technicalName } = FROZEN_KEY[recordType];
+  const iconType: RecordTypeKey = recordType;
+
+  const rows = requests.map(r => ({ request: r, diff: getRequestDiff(r) }));
+
+  const otherFields = fields.filter(f => f.key !== businessName && f.key !== technicalName && f.key !== 'dataItems');
+
+  // Changes-only: a column survives if ANY visible row actually changed it
+  // (or, for a create row, has a non-empty value — creates count every field
+  // as "new"). This is the same definition DiffGrid/FieldRow already use for
+  // a single request, just applied across the whole column.
+  const visibleFields = changesOnly
+    ? otherFields.filter(f => rows.some(({ diff }) => {
+        const key = f.key as string;
+        return diff.isCreate ? !isEmptyValue(diff.proposed[key]) : diff.changedSet.has(key);
+      }))
+    : otherFields;
+
+  const showSelection = !readOnly && !!onToggleSelect && !!onSelectMany;
+  const showActions = !readOnly && (!!onApprove || !!onReject);
+
+  const pendingIds = showSelection ? requests.filter(r => r.status === 'pending').map(r => r.id) : [];
+  const selectedCount = pendingIds.filter(id => selectedIds?.has(id)).length;
+  const headerChecked: boolean | 'indeterminate' = selectedCount === 0
+    ? false
+    : selectedCount === pendingIds.length ? true : 'indeterminate';
+
+  const nameLeft = showSelection ? CHECKBOX_W : 0;
+  const techLeft = nameLeft + NAME_W;
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+      <div className="overflow-auto max-h-[70vh]">
+        <table className="border-separate text-xs w-full" style={{ borderSpacing: 0 }}>
+          <thead>
+            <tr>
+              {showSelection && (
+                <th
+                  className="sticky top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-2 py-2 text-left"
+                  style={{ left: 0, width: CHECKBOX_W, minWidth: CHECKBOX_W }}
+                >
+                  {pendingIds.length > 0 && (
+                    <CheckboxPrimitive.Root
+                      checked={headerChecked}
+                      onCheckedChange={() => onSelectMany!(pendingIds)}
+                      aria-label="Select all pending rows in this table"
+                      className="w-4 h-4 rounded border border-gray-300 bg-white flex items-center justify-center data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-blue-600 data-[state=indeterminate]:border-blue-600"
+                    >
+                      <CheckboxPrimitive.Indicator>
+                        <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                      </CheckboxPrimitive.Indicator>
+                    </CheckboxPrimitive.Root>
+                  )}
+                </th>
+              )}
+              <th
+                className="sticky top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap"
+                style={{ left: nameLeft, width: NAME_W, minWidth: NAME_W }}
+              >
+                Business Name
+              </th>
+              <th
+                className="sticky top-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[3px_0_5px_-3px_rgba(0,0,0,0.12)]"
+                style={{ left: techLeft, width: TECH_W, minWidth: TECH_W }}
+              >
+                Technical Name
+              </th>
+              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Operation</th>
+              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Status</th>
+              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Subject Area</th>
+              {recordType === 'dataitem' && (
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Parent Entity</th>
+              )}
+              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Submitted By</th>
+              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Submitted At</th>
+              {visibleFields.map(f => (
+                <th
+                  key={f.key as string}
+                  className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap"
+                  style={{ minWidth: 160, maxWidth: 280 }}
+                >
+                  {f.label}
+                </th>
+              ))}
+              {showActions && (
+                <th
+                  className="sticky top-0 right-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.12)]"
+                  style={{ width: ACTIONS_W, minWidth: ACTIONS_W }}
+                >
+                  Actions
+                </th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ request, diff }) => {
+              const isPending = request.status === 'pending';
+              const isSelected = selectedIds?.has(request.id) ?? false;
+              const rowBg = isSelected ? 'bg-blue-50' : !isPending ? 'bg-gray-50/50' : 'bg-white';
+              const disableApprove = isParentPendingNew?.(request) ?? false;
+              const name = (request.proposedData as Entity | DataItem).name;
+              const techValue = diff.proposed[technicalName];
+
+              return (
+                <tr
+                  key={request.id}
+                  className={`${rowBg} hover:bg-blue-50/30 transition-colors group cursor-pointer`}
+                  onClick={() => onRowClick(request)}
+                >
+                  {showSelection && (
+                    <td
+                      className={`sticky z-10 ${rowBg} border-b border-r border-gray-100 px-2 py-2`}
+                      style={{ left: 0, width: CHECKBOX_W }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {isPending && (
+                        <CheckboxPrimitive.Root
+                          checked={isSelected}
+                          onCheckedChange={() => onToggleSelect!(request.id)}
+                          className="w-4 h-4 rounded border border-gray-300 bg-white flex items-center justify-center data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                        >
+                          <CheckboxPrimitive.Indicator>
+                            <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                          </CheckboxPrimitive.Indicator>
+                        </CheckboxPrimitive.Root>
+                      )}
+                    </td>
+                  )}
+                  <td
+                    className={`sticky z-10 ${rowBg} border-b border-r border-gray-100 px-3 py-2 font-medium text-gray-800`}
+                    style={{ left: nameLeft, width: NAME_W }}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <RecordTypeIcon type={iconType} size="xs" boxless />
+                      <span className="truncate group-hover:text-blue-700 group-hover:underline">{name}</span>
+                    </div>
+                  </td>
+                  <td
+                    className={`sticky z-10 ${rowBg} border-b border-gray-100 px-3 py-2 font-mono text-[11px] text-gray-500 shadow-[3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
+                    style={{ left: techLeft, width: TECH_W }}
+                  >
+                    {formatValue(techValue)}
+                  </td>
+                  <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap"><OperationBadge operation={request.type} /></td>
+                  <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap">
+                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium border capitalize ${STATUS_BADGE[request.status]}`}>
+                      {request.status}
+                    </span>
+                  </td>
+                  <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap text-gray-600">{request.subjectAreaName}</td>
+                  {recordType === 'dataitem' && (
+                    <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap text-gray-600">{request.parentEntityName ?? '—'}</td>
+                  )}
+                  <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap text-gray-600">{request.submittedBy || 'Unknown'}</td>
+                  <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap text-gray-500">{formatSubmittedAt(request.submittedAt)}</td>
+                  {visibleFields.map(f => {
+                    const key = f.key as string;
+                    const proposedVal = diff.proposed[key];
+                    const originalVal = diff.original ? diff.original[key] : undefined;
+                    const isChanged = diff.isCreate || diff.changedSet.has(key);
+                    return (
+                      <td key={key} className="border-b border-gray-100 px-3 py-2 align-top" style={{ minWidth: 160, maxWidth: 280 }}>
+                        <div className="break-words">
+                          <FieldValueCell value={proposedVal} originalValue={originalVal} isChanged={isChanged} isCreate={diff.isCreate} />
+                        </div>
+                      </td>
+                    );
+                  })}
+                  {showActions && (
+                    <td
+                      className={`sticky right-0 z-10 ${rowBg} border-b border-gray-100 px-2 py-2 shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
+                      style={{ width: ACTIONS_W }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {isPending ? (
+                        <div className="flex items-center gap-1.5">
+                          <ApproveButton size="sm" onClick={() => onApprove?.(request.id)} locked={disableApprove} className="px-2.5" />
+                          <RejectButton size="sm" onClick={() => onReject?.(request.id)} className="px-2.5" />
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-gray-400">No actions</span>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {changesOnly && visibleFields.length === 0 && (
+        <div className="px-4 py-3 text-xs text-gray-400 border-t border-gray-100">
+          No changed attributes beyond the identifier columns in this table — every row here is either unchanged or a new record.
+        </div>
+      )}
+    </div>
+  );
+}

@@ -95,3 +95,57 @@ export function DiffGrid({ diff, mode, className }: { diff: RequestDiff; mode: '
     </div>
   );
 }
+
+// ── Inline change preview — "at a glance", no expand required ──
+//
+// Renders directly in a request's collapsed row (RequestCard's compact view)
+// so scanning a long list of edits — e.g. dozens of sibling data items under
+// one entity — shows what actually changed on EVERY row without clicking
+// into any of them. Edits only: creates already read as "all fields new" via
+// the operation badge, so restating every new value here would be noise.
+//
+// Shaped as a left-accented callout STRIP (not a rounded pill) so it reads
+// clearly apart from OperationBadge's rounded "Edit" chip right above it in
+// the row — same attention color (amber), different silhouette, so the two
+// don't blur into "one more status badge." The strip's tint + left border
+// give it enough weight to catch the eye while scanning a long list; the
+// content inside still uses the established before → after language (muted
+// strikethrough old value, bold emerald new value).
+
+const INLINE_PREVIEW_CAP = 3;
+
+export function InlineChangePreview({ diff, cap = INLINE_PREVIEW_CAP }: { diff: RequestDiff; cap?: number }) {
+  if (diff.isCreate) return null;
+  const changed = visibleDiffFields(diff, 'changes');
+  if (changed.length === 0) return null;
+
+  const visible = changed.slice(0, cap);
+  const hidden = changed.length - visible.length;
+
+  return (
+    <div className="mt-1.5 pl-2.5 pr-2 py-1.5 border-l-[3px] border-amber-400 bg-amber-50/70 rounded-r-md flex items-center gap-x-3 gap-y-1 flex-wrap">
+      {visible.map(({ key, label }) => {
+        const proposedVal = diff.proposed[key as string];
+        const originalVal = diff.original ? diff.original[key as string] : undefined;
+        const proposedDisplay = formatValue(proposedVal);
+        const originalDisplay = formatValue(originalVal);
+        const showTransition = originalDisplay !== '—' && originalDisplay !== proposedDisplay;
+        return (
+          <span key={key as string} className="inline-flex items-center gap-1 text-xs max-w-[280px]">
+            <span className="font-semibold text-gray-600 flex-shrink-0">{label}</span>
+            {showTransition && (
+              <>
+                <span className="text-gray-400 line-through truncate">{originalDisplay}</span>
+                <span className="text-amber-500 flex-shrink-0" aria-hidden="true">→</span>
+              </>
+            )}
+            <span className="text-emerald-700 font-bold truncate">{proposedDisplay}</span>
+          </span>
+        );
+      })}
+      {hidden > 0 && (
+        <span className="text-xs text-amber-700 font-semibold flex-shrink-0">+{hidden} more</span>
+      )}
+    </div>
+  );
+}
