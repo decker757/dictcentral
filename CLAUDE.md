@@ -97,9 +97,6 @@ src/app/
                             carry over) with status flipped back to 'pending'.
     BoardRequestCard.tsx    Board Member's request-list card — operation badge(s),
                             status, and (once resolved) reviewer name + timestamp only.
-    RequestCard.tsx     Per-record diff card — now only used by the Board Member's read-only
-                        "My Requests" (re-exports FieldRow/ENTITY_FIELDS/DATAITEM_FIELDS for
-                        compat); diff rendering lives in shared/DiffGrid
     FocusModeView.tsx   One-request-at-a-time review mode (keyboard-driven), wraps
                         SubmissionDetailView in next/prev/skip/exit chrome
     TreeView/TableView/SearchBar
@@ -114,8 +111,7 @@ src/app/
                        input/select/textarea cells driven by fieldSchema's `kind`/`options` —
                        used only by ReviseSubmissionView), CommentThread (a comment list +
                        add-input, reused by both the generic and per-row threads, compact or
-                       roomy), RequestGroupList (board's read-only list), ExcelDropzone
-                       (+useExcelImport), MetaCell
+                       roomy), ExcelDropzone (+useExcelImport), MetaCell
     ui/                Modal/ModalHeader, Field (Text/Select/TextArea), Segmented,
                        + shadcn primitives (alert-dialog, button, textarea, label, utils)
 ```
