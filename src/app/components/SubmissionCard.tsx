@@ -4,7 +4,7 @@
 // contains. Clicking it opens the full Excel-style table (SubmissionDetailView)
 // where the whole request is accepted or rejected as one unit.
 
-import { Clock, Database, FileText, ChevronRight, Layers } from 'lucide-react';
+import { Clock, Database, FileText, ChevronRight, Layers, ShieldCheck } from 'lucide-react';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import { Check } from 'lucide-react';
 import { Submission } from '../lib/submissions';
@@ -12,12 +12,14 @@ import { OperationBadge, SubmissionStatusBadge } from '../lib/badges';
 import { formatSubmittedAt } from '../lib/format';
 
 export function SubmissionCard({
-  submission, onOpen, selected, onToggleSelect,
+  submission, onOpen, selected, onToggleSelect, showDgoReviewer,
 }: {
   submission: Submission;
   onOpen: () => void;
   selected?: boolean;
   onToggleSelect?: () => void;
+  /** HOD queue only — shows which DGO approved (forwarded) this request, alongside the requester. */
+  showDgoReviewer?: boolean;
 }) {
   const total = submission.entityCount + submission.dataItemCount;
   const isPending = submission.status === 'pending';
@@ -61,6 +63,15 @@ export function SubmissionCard({
             <span>{formatSubmittedAt(submission.submittedAt)}</span>
             <span className="text-gray-300">·</span>
             <span className="truncate">{submission.subjectAreaNames.join(', ')}</span>
+            {showDgoReviewer && submission.dgoReviewedBy && (
+              <>
+                <span className="text-gray-300">·</span>
+                <span className="flex items-center gap-1 flex-shrink-0">
+                  <ShieldCheck className="w-3 h-3 text-purple-500" />
+                  DGO: <span className="font-medium text-gray-600">{submission.dgoReviewedBy}</span>
+                </span>
+              </>
+            )}
           </div>
         </div>
 

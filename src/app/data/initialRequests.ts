@@ -15,7 +15,9 @@ const clinicalEncounters = healthcare.entities[1]; // Clinical Encounters
 const primaryPhone = patientDemo.dataItems[4];      // Primary Phone
 const diagnosisCode = clinicalEncounters.dataItems[4]; // Diagnosis Code
 
-export const initialRequests: ChangeRequest[] = [
+// All seed requests start fresh at the DGO review stage — `stage: 'dgo'` is
+// appended uniformly below rather than repeated on every literal.
+const rawInitialRequests: Omit<ChangeRequest, 'stage'>[] = [
   // ── 1. EDIT REQUEST: data items under TWO DIFFERENT entities in Housing —
   // Property Address (Property Records) and Tenant Name (Rental Agreements).
   // Demonstrates a single request spanning multiple entity groups in the
@@ -233,7 +235,7 @@ export const initialRequests: ChangeRequest[] = [
   // Every one of the 5 moves Classification → Restricted and Sensitivity
   // Level → Critical, regardless of what each item's current value was —
   // the common-edit scenario the inline change preview is meant to surface.
-  ...propRecords.dataItems.slice(0, 5).map((item): ChangeRequest => ({
+  ...propRecords.dataItems.slice(0, 5).map((item): Omit<ChangeRequest, 'stage'> => ({
     id: `req-bulk-${item.id}`,
     batchId: 'batch-005',
     type: 'edit',
@@ -311,7 +313,7 @@ export const initialRequests: ChangeRequest[] = [
       proposed: { classification: 'Confidential', sensitivityLevel: 'High' } as Partial<DataItem>,
       changedFields: ['classification', 'sensitivityLevel'],
     },
-  ] satisfies Array<{ original: DataItem; proposed: Partial<DataItem>; changedFields: string[] }>).map(({ original, proposed, changedFields }, i): ChangeRequest => ({
+  ] satisfies Array<{ original: DataItem; proposed: Partial<DataItem>; changedFields: string[] }>).map(({ original, proposed, changedFields }, i): Omit<ChangeRequest, 'stage'> => ({
     id: `req-ce-${i + 1}`,
     batchId: 'batch-006',
     type: 'edit',
@@ -328,3 +330,5 @@ export const initialRequests: ChangeRequest[] = [
     changedFields,
   })),
 ];
+
+export const initialRequests: ChangeRequest[] = rawInitialRequests.map(r => ({ ...r, stage: 'dgo' as const }));

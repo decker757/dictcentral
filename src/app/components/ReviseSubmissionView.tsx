@@ -122,7 +122,9 @@ export function ReviseSubmissionView({
 
         {submission.rejectionReason && (
           <div className="px-6 py-2.5 bg-red-50 border-b border-red-100 text-xs text-red-700">
-            <span className="font-semibold">Rejection Reason:</span> {submission.rejectionReason}
+            <span className="font-semibold">
+              Rejection Reason{submission.reviewedBy ? ` (by ${submission.reviewedBy})` : ''}:
+            </span> {submission.rejectionReason}
           </div>
         )}
 

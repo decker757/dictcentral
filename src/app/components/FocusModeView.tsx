@@ -27,11 +27,16 @@ interface FocusModeViewProps {
   batchComments: Record<string, Comment[]>;
   onAddBatchComment: (batchId: string, text: string) => void;
   isBatchBlocked: (batchId: string) => boolean;
+  /** Label for the approve button — see SubmissionDetailView. */
+  approveLabel?: string;
+  /** HOD view: per-item comments are read-only — see SubmissionDetailView. */
+  disableItemComments?: boolean;
 }
 
 export function FocusModeView({
   queueIds, requests, subjectAreas, onApprove, onReject, onExit, onEntityClick, onRowClick,
   itemComments, onAddItemComment, batchComments, onAddBatchComment, isBatchBlocked,
+  approveLabel, disableItemComments,
 }: FocusModeViewProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -178,6 +183,8 @@ export function FocusModeView({
         onBack={onExit}
         onApprove={approveCurrent}
         onReject={openReject}
+        approveLabel={approveLabel}
+        disableItemComments={disableItemComments}
         onEntityClick={onEntityClick}
         onRowClick={onRowClick}
         itemComments={itemComments}

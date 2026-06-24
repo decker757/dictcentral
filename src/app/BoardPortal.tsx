@@ -21,6 +21,7 @@ import { BoardRequestCard } from './components/BoardRequestCard';
 import { SubmissionDetailView } from './components/SubmissionDetailView';
 import { ReviseSubmissionView } from './components/ReviseSubmissionView';
 import { WithdrawDialog } from './components/shared/WithdrawDialog';
+import { DeleteConfirmDialog } from './components/shared/DeleteConfirmDialog';
 import { countEntities, countDataItems, countMatches, findEntityById } from './lib/catalog';
 import { CURRENT_BOARD_MEMBER } from './lib/constants';
 import { TypeLegend } from './lib/badges';
@@ -40,6 +41,11 @@ type ModalState =
   | { type: 'requestDetail'; request: ChangeRequest }
   | null;
 
+type PendingDelete =
+  | { recordType: 'entity'; id: string; name: string; childCount: number }
+  | { recordType: 'dataitem'; id: string; name: string }
+  | null;
+
 interface BoardPortalProps {
   subjectAreas: SubjectArea[];
   requests: ChangeRequest[];
@@ -47,6 +53,8 @@ interface BoardPortalProps {
   onSubmitCreateDataItem: (entityId: string, dataItem: DataItem) => void;
   onSubmitEditEntity: (entityId: string, updates: Partial<Entity>) => void;
   onSubmitEditDataItem: (dataItemId: string, updates: Partial<DataItem>) => void;
+  onSubmitDeleteEntity: (entityId: string) => void;
+  onSubmitDeleteDataItem: (dataItemId: string) => void;
   onReviseAndResubmit: (batchId: string, drafts: Record<string, Partial<RecordAttributes>>) => void;
   onWithdraw: (batchId: string) => void;
   onLeave: () => void;
@@ -57,12 +65,14 @@ interface BoardPortalProps {
 export function BoardPortal({
   subjectAreas, requests,
   onSubmitCreateEntity, onSubmitCreateDataItem, onSubmitEditEntity, onSubmitEditDataItem,
+  onSubmitDeleteEntity, onSubmitDeleteDataItem,
   onReviseAndResubmit, onWithdraw, onLeave, itemComments, batchComments,
 }: BoardPortalProps) {
   const [boardTab, setBoardTab] = useState<BoardTab>('catalog');
   const [catalogTab, setCatalogTab] = useState<CatalogTab>('tree');
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
 
   // My Requests: list of the member's own submissions (one card per batchId)
   // → click into one for the full read-only detail view. Only ONE request is
@@ -109,6 +119,18 @@ export function BoardPortal({
   const handleEditEntity = (entityId: string, updates: Partial<Entity>) => { onSubmitEditEntity(entityId, updates); setModal(null); };
   const handleEditDataItem = (diId: string, updates: Partial<DataItem>) => { onSubmitEditDataItem(diId, updates); setModal(null); };
 
+  const requestDeleteEntity = (entity: Entity) =>
+    setPendingDelete({ recordType: 'entity', id: entity.id, name: entity.name, childCount: entity.dataItems.length });
+  const requestDeleteDataItem = (dataItem: DataItem) =>
+    setPendingDelete({ recordType: 'dataitem', id: dataItem.id, name: dataItem.name });
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    if (pendingDelete.recordType === 'entity') onSubmitDeleteEntity(pendingDelete.id);
+    else onSubmitDeleteDataItem(pendingDelete.id);
+    setPendingDelete(null);
+    setModal(null);
+  };
+
   // ── My Requests navigation ───────────────────────────────────
   /** Open a request: always lands on the read-only detail view, never mid-revise. */
   const openRequest = (batchId: string | null) => { setOpenBatchId(batchId); setRevisingBatchId(null); };
@@ -146,9 +168,6 @@ export function BoardPortal({
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-lg font-bold text-gray-900 tracking-tight">DictCentral</span>
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full border border-blue-200">
-                  Board Member
-                </span>
               </div>
             </div>
 
@@ -204,14 +223,6 @@ export function BoardPortal({
           </div>
         </div>
       </header>
-
-      {/* Approval notice banner */}
-      <div className="bg-amber-50 border-b border-amber-200 px-6 py-2">
-        <div className="max-w-[1600px] mx-auto text-xs text-amber-700 flex items-center gap-2">
-          <span className="w-3 h-3 bg-amber-500 rounded-full flex-shrink-0" />
-          Your create and edit submissions are sent for approval before going live. Changes will appear in the catalog once an approver reviews them.
-        </div>
-      </div>
 
       {/* Main */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-6 py-5 flex flex-col gap-5">
@@ -372,11 +383,8 @@ export function BoardPortal({
 
       {/* Footer */}
       <footer className="bg-white border-t border-gray-100 mt-auto">
-        <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between text-xs text-gray-400">
+        <div className="max-w-[1600px] mx-auto px-6 py-3 text-xs text-gray-400">
           <span>DictCentral · Board Member Portal</span>
-          <button onClick={onLeave} className="hover:text-gray-600 transition-colors flex items-center gap-1">
-            <LogOut className="w-3 h-3" /> Switch role
-          </button>
         </div>
       </footer>
 
@@ -388,6 +396,7 @@ export function BoardPortal({
           onClose={() => setModal(null)}
           onDataItemClick={(di, e, sa) => setModal({ type: 'dataItem', dataItem: di, entity: e, subjectArea: sa, readOnly: modal.readOnly })}
           onUpdate={modal.readOnly ? () => {} : handleEditEntity}
+          onDeleteRequest={modal.readOnly ? undefined : () => requestDeleteEntity(modal.entity)}
           readOnly={modal.readOnly}
         />
       )}
@@ -399,6 +408,7 @@ export function BoardPortal({
           onClose={() => setModal(null)}
           onEntityClick={(e, sa) => setModal({ type: 'entity', entity: e, subjectArea: sa, readOnly: modal.readOnly })}
           onUpdate={modal.readOnly ? () => {} : handleEditDataItem}
+          onDeleteRequest={modal.readOnly ? undefined : () => requestDeleteDataItem(modal.dataItem)}
           readOnly={modal.readOnly}
         />
       )}
@@ -438,6 +448,15 @@ export function BoardPortal({
         open={withdrawingBatchId !== null}
         onClose={() => setWithdrawingBatchId(null)}
         onConfirm={confirmWithdraw}
+      />
+
+      <DeleteConfirmDialog
+        open={pendingDelete !== null}
+        recordName={pendingDelete?.name}
+        recordType={pendingDelete?.recordType}
+        childCount={pendingDelete?.recordType === 'entity' ? pendingDelete.childCount : undefined}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
       />
     </div>
   );

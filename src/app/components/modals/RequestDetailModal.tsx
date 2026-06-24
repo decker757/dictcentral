@@ -16,7 +16,10 @@ import { formatSubmittedAt } from '../../lib/format';
 
 export function RequestDetailModal({ request, onClose }: { request: ChangeRequest; onClose: () => void }) {
   const diff = getRequestDiff(request);
-  const [viewMode, setViewMode] = useState<'full' | 'changes'>(diff.isCreate ? 'full' : 'changes');
+  // Deletes have nothing "changed" to show (proposedData === originalData) — default to Full
+  // View and hide the toggle, same treatment as a create.
+  const isDelete = request.type === 'delete';
+  const [viewMode, setViewMode] = useState<'full' | 'changes'>(diff.isCreate || isDelete ? 'full' : 'changes');
   const name = (request.proposedData as Entity | DataItem).name;
 
   return (
@@ -57,14 +60,16 @@ export function RequestDetailModal({ request, onClose }: { request: ChangeReques
 
         {request.rejectionReason && (
           <div className="px-6 py-2.5 bg-red-50 border-b border-red-100 text-xs text-red-700">
-            <span className="font-semibold">Rejection Reason:</span> {request.rejectionReason}
+            <span className="font-semibold">
+              Rejection Reason{request.reviewedBy ? ` (by ${request.reviewedBy})` : ''}:
+            </span> {request.rejectionReason}
           </div>
         )}
 
         {/* View toggle + change summary — same pattern as RequestCard's expanded body */}
         <div className="px-6 py-2.5 border-b border-gray-100 bg-white flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
-            {!diff.isCreate && (
+            {!diff.isCreate && !isDelete && (
               <div className="flex rounded-lg border border-gray-200 overflow-hidden bg-white text-xs">
                 <button
                   onClick={() => setViewMode('full')}
@@ -80,7 +85,7 @@ export function RequestDetailModal({ request, onClose }: { request: ChangeReques
                 </button>
               </div>
             )}
-            {!diff.isCreate && diff.changedSet.size > 0 && (
+            {!diff.isCreate && !isDelete && diff.changedSet.size > 0 && (
               <span className="text-xs text-gray-500">
                 <span className="font-semibold text-amber-600">{diff.changedSet.size}</span> field{diff.changedSet.size !== 1 ? 's' : ''} changed
               </span>
@@ -89,6 +94,11 @@ export function RequestDetailModal({ request, onClose }: { request: ChangeReques
               <span className="text-xs text-gray-500 flex items-center gap-1.5">
                 <Layers2 className="w-3.5 h-3.5 text-emerald-500" />
                 All fields are new
+              </span>
+            )}
+            {isDelete && (
+              <span className="text-xs text-gray-500 flex items-center gap-1.5">
+                Showing the current record as it stands before deletion
               </span>
             )}
           </div>

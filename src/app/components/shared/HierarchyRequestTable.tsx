@@ -124,10 +124,14 @@ interface GroupTableProps {
   onDraftChange: (requestId: string, text: string) => void;
   /** Board member view: comments are the approver's notes, shown but not editable. */
   readOnly?: boolean;
+  /** HOD view: the per-item Comments column is removed entirely (not just read-only) —
+   * HODs never see DGO-authored per-item notes, only the generic whole-request comment
+   * (handled outside this table, in SubmissionDetailView). */
+  hideComments?: boolean;
 }
 
 function EntityGroupTable({
-  block, subjectAreas, onRowClick, onEntityClick, comments, drafts, onDraftChange, readOnly,
+  block, subjectAreas, onRowClick, onEntityClick, comments, drafts, onDraftChange, readOnly, hideComments,
 }: GroupTableProps) {
   // Per-group toggle — scoped to this entity's table only. Defaults to the
   // full attribute view; "Changes Only" is an explicit, named choice.
@@ -243,24 +247,26 @@ function EntityGroupTable({
             </td>
           );
         })}
-        <td
-          className={`sticky right-0 z-10 ${rowBg} border-b border-gray-100 px-2 py-1.5 align-top shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
-          style={{ width: COMMENT_W }}
-          onClick={e => e.stopPropagation()}
-        >
-          {!row.isContext ? (
-            <CommentThread
-              comments={comments[row.id] ?? []}
-              readOnly={readOnly}
-              draft={drafts[row.id] ?? ''}
-              onDraftChange={readOnly ? undefined : text => onDraftChange(row.id, text)}
-              placeholder="Add a comment…"
-              compact
-            />
-          ) : (
-            <span className="text-[11px] text-gray-400">—</span>
-          )}
-        </td>
+        {!hideComments && (
+          <td
+            className={`sticky right-0 z-10 ${rowBg} border-b border-gray-100 px-2 py-1.5 align-top shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
+            style={{ width: COMMENT_W }}
+            onClick={e => e.stopPropagation()}
+          >
+            {!row.isContext ? (
+              <CommentThread
+                comments={comments[row.id] ?? []}
+                readOnly={readOnly}
+                draft={drafts[row.id] ?? ''}
+                onDraftChange={readOnly ? undefined : text => onDraftChange(row.id, text)}
+                placeholder="Add a comment…"
+                compact
+              />
+            ) : (
+              <span className="text-[11px] text-gray-400">—</span>
+            )}
+          </td>
+        )}
       </tr>
     );
   };
@@ -315,9 +321,11 @@ function EntityGroupTable({
                   {f.label}
                 </th>
               ))}
-              <th className="sticky top-0 right-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.12)]" style={{ width: COMMENT_W, minWidth: COMMENT_W }}>
-                Comments
-              </th>
+              {!hideComments && (
+                <th className="sticky top-0 right-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.12)]" style={{ width: COMMENT_W, minWidth: COMMENT_W }}>
+                  Comments
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -344,10 +352,12 @@ interface HierarchyRequestTableProps {
   drafts: Record<string, string>;
   onDraftChange: (requestId: string, text: string) => void;
   readOnly?: boolean;
+  /** See EntityGroupTable — removes the Comments column entirely (HOD view). */
+  hideComments?: boolean;
 }
 
 export function HierarchyRequestTable({
-  groups, subjectAreas, onRowClick, onEntityClick, comments, drafts, onDraftChange, readOnly,
+  groups, subjectAreas, onRowClick, onEntityClick, comments, drafts, onDraftChange, readOnly, hideComments,
 }: HierarchyRequestTableProps) {
   // Flattened — no subject-area grouping/header; just one entity group after
   // another, each its own self-contained parent+children table.
@@ -366,6 +376,7 @@ export function HierarchyRequestTable({
           drafts={drafts}
           onDraftChange={onDraftChange}
           readOnly={readOnly}
+          hideComments={hideComments}
         />
       ))}
     </div>

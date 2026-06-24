@@ -33,7 +33,7 @@ export function buildSubmissionCsv(items: ChangeRequest[], itemComments: Record<
     const values = data as unknown as Record<string, unknown>;
     return [
       req.recordType === 'entity' ? 'Entity' : 'Data Item',
-      req.type === 'create' ? 'Create' : 'Edit',
+      req.type === 'create' ? 'Create' : req.type === 'edit' ? 'Edit' : 'Delete',
       data.name,
       data.technicalName,
       ...EXPORT_FIELDS.map(f => formatValue(values[f.key as string])),

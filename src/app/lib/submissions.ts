@@ -1,10 +1,10 @@
-// Groups individual ChangeRequests into "submissions" — the unit an approver
+// Groups individual ChangeRequests into "submissions" — the unit a reviewer
 // actually reviews and acts on. A submission is every entity/data-item
 // request sharing one `batchId` (i.e. submitted together as one request),
-// and approvers accept or reject the WHOLE submission at once — never an
+// and reviewers accept or reject the WHOLE submission at once — never an
 // individual entity or data item inside it.
 
-import { ChangeRequest, RequestStatus, RequestType } from '../types';
+import { ChangeRequest, RequestStatus, RequestType, RequestStage } from '../types';
 
 export interface Submission {
   batchId: string;
@@ -13,6 +13,8 @@ export interface Submission {
   submittedAt: string;
   /** Derived: 'pending' if anything in the batch is still pending, else the shared resolved status. */
   status: RequestStatus;
+  /** Which review stage currently owns this submission while it's pending — see RequestStage. */
+  stage: RequestStage;
   /** Distinct operations present in this request (Create / Edit / Delete), in that display order. */
   operations: RequestType[];
   items: ChangeRequest[];
@@ -20,11 +22,15 @@ export interface Submission {
   dataItemCount: number;
   subjectAreaNames: string[];
   rejectionReason?: string;
+  /** The DGO who approved (forwarded) this submission, and when — set once a DGO has acted on it. */
+  dgoReviewedBy?: string;
+  dgoReviewedAt?: string;
+  /** Whoever FINALLY resolved this submission (HOD approval, or a rejection at either stage). */
   reviewedBy?: string;
   reviewedAt?: string;
 }
 
-const OPERATION_ORDER: RequestType[] = ['create', 'edit'];
+const OPERATION_ORDER: RequestType[] = ['create', 'edit', 'delete'];
 
 function deriveOperations(items: ChangeRequest[]): RequestType[] {
   return OPERATION_ORDER.filter(op => items.some(i => i.type === op));
@@ -57,13 +63,17 @@ export function groupRequestsByBatch(requests: ChangeRequest[]): Submission[] {
     const dataItemCount = items.filter(i => i.recordType === 'dataitem').length;
     const subjectAreaNames = Array.from(new Set(items.map(i => i.subjectAreaName)));
     const rejectionReason = items.find(i => i.rejectionReason)?.rejectionReason;
+    const dgoReviewedBy = items.find(i => i.dgoReviewedBy)?.dgoReviewedBy;
+    const dgoReviewedAt = items.find(i => i.dgoReviewedAt)?.dgoReviewedAt;
     const reviewedBy = items.find(i => i.reviewedBy)?.reviewedBy;
     const reviewedAt = items.find(i => i.reviewedAt)?.reviewedAt;
     return {
       batchId, submittedBy, submittedAt,
       status: deriveStatus(items),
+      stage: sorted[0].stage,
       operations: deriveOperations(items),
-      items, entityCount, dataItemCount, subjectAreaNames, rejectionReason, reviewedBy, reviewedAt,
+      items, entityCount, dataItemCount, subjectAreaNames, rejectionReason,
+      dgoReviewedBy, dgoReviewedAt, reviewedBy, reviewedAt,
     };
   });
 

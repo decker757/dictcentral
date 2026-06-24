@@ -1,25 +1,30 @@
 // Top-level role router. Picks the role (LandingPage), then renders that
-// role's portal as its own self-contained component — BoardPortal and
-// ApproverPortal each own their own header/tabs/modal state, the same way
-// any two sibling screens in this app would. App itself stays pure routing +
-// wiring useCatalog's state/actions into whichever portal is active; it has
-// no UI or business logic of its own.
+// role's portal as its own self-contained component — BoardPortal,
+// ApproverPortal (DGO), and HODPortal each own their own header/tabs/modal
+// state, the same way any sibling screens in this app would. App itself
+// stays pure routing + wiring useCatalog's state/actions into whichever
+// portal is active, binding each role's identity (who's submitting, who's
+// commenting, who's reviewing) so the portals themselves never have to think
+// about "which person am I" — they just call the prop they were given.
 
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 import { LandingPage } from './LandingPage';
 import { BoardPortal } from './BoardPortal';
 import { ApproverPortal } from './ApproverPortal';
+import { HODPortal } from './HODPortal';
 import { useCatalog } from './hooks/useCatalog';
+import { CURRENT_BOARD_MEMBER, CURRENT_DGO, CURRENT_HOD } from './lib/constants';
 
-type Role = 'selection' | 'board' | 'approver';
+type Role = 'selection' | 'board' | 'dgo' | 'hod';
 
 export default function App() {
   const [role, setRole] = useState<Role>('selection');
   const {
     subjectAreas, requests,
     submitCreateEntity, submitCreateDataItem, submitEditEntity, submitEditDataItem,
-    approve, reject, reviseAndResubmit, withdraw,
+    submitDeleteEntity, submitDeleteDataItem,
+    approveDgo, approveHod, reject, reviseAndResubmit, withdraw,
     itemComments, addItemComment, batchComments, addBatchComment,
   } = useCatalog();
 
@@ -29,31 +34,54 @@ export default function App() {
 
   return (
     <>
-      {role === 'board' ? (
+      {role === 'board' && (
         <BoardPortal
           subjectAreas={subjectAreas}
           requests={requests}
-          onSubmitCreateEntity={submitCreateEntity}
-          onSubmitCreateDataItem={submitCreateDataItem}
-          onSubmitEditEntity={submitEditEntity}
-          onSubmitEditDataItem={submitEditDataItem}
+          onSubmitCreateEntity={(saId, e) => submitCreateEntity(saId, e, CURRENT_BOARD_MEMBER)}
+          onSubmitCreateDataItem={(eId, di) => submitCreateDataItem(eId, di, CURRENT_BOARD_MEMBER)}
+          onSubmitEditEntity={(eId, u) => submitEditEntity(eId, u, CURRENT_BOARD_MEMBER)}
+          onSubmitEditDataItem={(diId, u) => submitEditDataItem(diId, u, CURRENT_BOARD_MEMBER)}
+          onSubmitDeleteEntity={eId => submitDeleteEntity(eId, CURRENT_BOARD_MEMBER)}
+          onSubmitDeleteDataItem={diId => submitDeleteDataItem(diId, CURRENT_BOARD_MEMBER)}
           onReviseAndResubmit={reviseAndResubmit}
           onWithdraw={withdraw}
           onLeave={() => setRole('selection')}
           itemComments={itemComments}
           batchComments={batchComments}
         />
-      ) : (
+      )}
+      {role === 'dgo' && (
         <ApproverPortal
           subjectAreas={subjectAreas}
           requests={requests}
-          onApprove={approve}
-          onReject={reject}
+          onApproveDgo={batchId => approveDgo(batchId, CURRENT_DGO)}
+          onReject={(batchId, reason) => reject(batchId, reason, CURRENT_DGO)}
           onLeave={() => setRole('selection')}
           itemComments={itemComments}
-          onAddItemComment={addItemComment}
+          onAddItemComment={(requestId, text) => addItemComment(requestId, text, CURRENT_DGO)}
           batchComments={batchComments}
-          onAddBatchComment={addBatchComment}
+          onAddBatchComment={(batchId, text) => addBatchComment(batchId, text, CURRENT_DGO)}
+          onSubmitCreateEntity={(saId, e) => submitCreateEntity(saId, e, CURRENT_DGO)}
+          onSubmitCreateDataItem={(eId, di) => submitCreateDataItem(eId, di, CURRENT_DGO)}
+          onSubmitEditEntity={(eId, u) => submitEditEntity(eId, u, CURRENT_DGO)}
+          onSubmitEditDataItem={(diId, u) => submitEditDataItem(diId, u, CURRENT_DGO)}
+          onSubmitDeleteEntity={eId => submitDeleteEntity(eId, CURRENT_DGO)}
+          onSubmitDeleteDataItem={diId => submitDeleteDataItem(diId, CURRENT_DGO)}
+          onReviseAndResubmit={reviseAndResubmit}
+          onWithdraw={withdraw}
+        />
+      )}
+      {role === 'hod' && (
+        <HODPortal
+          subjectAreas={subjectAreas}
+          requests={requests}
+          onApproveHod={batchId => approveHod(batchId, CURRENT_HOD)}
+          onReject={(batchId, reason) => reject(batchId, reason, CURRENT_HOD)}
+          onLeave={() => setRole('selection')}
+          itemComments={itemComments}
+          batchComments={batchComments}
+          onAddBatchComment={(batchId, text) => addBatchComment(batchId, text, CURRENT_HOD)}
         />
       )}
       <Toaster richColors position="bottom-right" />

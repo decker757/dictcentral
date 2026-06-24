@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   Database, Shield, Activity, User, RefreshCw, Hash, Clock,
   Archive, GitBranch, Star, BookOpen, Gauge, Tag, Edit2, Save,
-  XCircle, FileText, ChevronRight,
+  XCircle, FileText, ChevronRight, Trash2,
 } from 'lucide-react';
 import { Entity, DataItem, SubjectArea } from '../../types';
 import { Modal, CloseButton } from '../ui/Modal';
@@ -16,6 +16,10 @@ interface EntityModalProps {
   onClose: () => void;
   onDataItemClick: (dataItem: DataItem, entity: Entity, subjectArea: SubjectArea) => void;
   onUpdate: (entityId: string, updates: Partial<Entity>) => void;
+  /** Present (and !readOnly) shows a "Delete" button next to Edit — triggers a confirmation
+   * dialog in the parent portal, NOT an immediate delete. Omit to hide the button entirely
+   * (e.g. for HOD, who can't request create/edit/delete from the catalog). */
+  onDeleteRequest?: () => void;
   readOnly?: boolean;
 }
 
@@ -35,7 +39,7 @@ const EDIT_FIELDS: [string, keyof Entity][] = [
   ['Last Updated', 'lastUpdated'],
 ];
 
-export function EntityModal({ entity: initialEntity, subjectArea, onClose, onDataItemClick, onUpdate, readOnly }: EntityModalProps) {
+export function EntityModal({ entity: initialEntity, subjectArea, onClose, onDataItemClick, onUpdate, onDeleteRequest, readOnly }: EntityModalProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ ...initialEntity });
 
@@ -112,9 +116,16 @@ export function EntityModal({ entity: initialEntity, subjectArea, onClose, onDat
               </>
             ) : (
               !readOnly && (
-                <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
-                  <Edit2 className="w-4 h-4" /> Edit
-                </button>
+                <>
+                  <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+                    <Edit2 className="w-4 h-4" /> Edit
+                  </button>
+                  {onDeleteRequest && (
+                    <button onClick={onDeleteRequest} className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 border border-red-200 transition-colors">
+                      <Trash2 className="w-4 h-4" /> Delete
+                    </button>
+                  )}
+                </>
               )
             )}
             <CloseButton onClose={onClose} />

@@ -62,8 +62,18 @@ export interface SubjectArea {
 // ── Approval workflow ──────────────────────────────────────────
 
 export type RequestRecordType = 'entity' | 'dataitem';
-export type RequestType = 'create' | 'edit';
+export type RequestType = 'create' | 'edit' | 'delete';
 export type RequestStatus = 'pending' | 'approved' | 'rejected';
+/**
+ * Two-stage approval pipeline: a request is first reviewed by a DGO (Data
+ * Governance Officer), and only once a DGO approves does it move on to an
+ * HOD (Head of Department) for final approval. `stage` tracks WHICH stage
+ * currently owns a pending request — only meaningful while status ===
+ * 'pending' (once resolved, status alone tells the story). A DGO approval
+ * does NOT commit the request to the catalog by itself — only an HOD
+ * approval does (see useCatalog.approveHod).
+ */
+export type RequestStage = 'dgo' | 'hod';
 
 /**
  * One entry in a review comment thread. Threads accumulate across multiple
@@ -83,7 +93,7 @@ export interface ChangeRequest {
   id: string;
   /**
    * Groups every entity/data-item change submitted together into ONE
-   * reviewable request. Approvers act on the whole batchId at once (accept
+   * reviewable request. Reviewers act on the whole batchId at once (accept
    * or reject everything in it) — they can no longer approve/reject
    * individual entities or data items within it. See lib/submissions.ts.
    */
@@ -94,7 +104,13 @@ export interface ChangeRequest {
   submittedAt: string;   // ISO date-time string
   submittedBy: string;
   rejectionReason?: string;
-  /** Who actioned this request (approved/rejected it), and when — set together with status. */
+  /** Which review stage currently owns this request while it's pending — see RequestStage. */
+  stage: RequestStage;
+  /** The DGO who approved this request (forwarding it to HOD), and when. Set once, never cleared
+   * by an HOD action — only a revise-and-resubmit (which restarts the whole pipeline) clears it. */
+  dgoReviewedBy?: string;
+  dgoReviewedAt?: string;
+  /** Whoever FINALLY resolved this request (approved it as HOD, or rejected it at either stage), and when. */
   reviewedBy?: string;
   reviewedAt?: string;
 
