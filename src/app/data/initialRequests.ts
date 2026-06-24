@@ -6,71 +6,104 @@ const housing = mockSubjectAreas[0];
 const propRecords = housing.entities[0];
 const propId = propRecords.dataItems[0];       // Property ID
 const propAddress = propRecords.dataItems[1];   // Property Address
+const rentalAgreements = housing.entities[1];
+const tenantName = rentalAgreements.dataItems[2]; // Tenant Name
 
 const healthcare = mockSubjectAreas[2];
 const patientDemo = healthcare.entities[0];
 const clinicalEncounters = healthcare.entities[1]; // Clinical Encounters
+const primaryPhone = patientDemo.dataItems[4];      // Primary Phone
+const diagnosisCode = clinicalEncounters.dataItems[4]; // Diagnosis Code
 
 export const initialRequests: ChangeRequest[] = [
-  // ── 1. Create request: new Entity in Healthcare ──────────────
+  // ── 1. EDIT REQUEST: data items under TWO DIFFERENT entities in Housing —
+  // Property Address (Property Records) and Tenant Name (Rental Agreements).
+  // Demonstrates a single request spanning multiple entity groups in the
+  // hierarchy table, not just multiple rows under one parent.
   {
     id: 'req-001',
-    type: 'create',
-    recordType: 'entity',
+    batchId: 'batch-001',
+    type: 'edit',
+    recordType: 'dataitem',
     status: 'pending',
     submittedAt: '2026-06-11T07:45:00Z',
     submittedBy: 'Dr. James Park',
-    subjectAreaId: healthcare.id,
-    subjectAreaName: healthcare.name,
+    subjectAreaId: housing.id,
+    subjectAreaName: housing.name,
+    parentEntityId: propRecords.id,
+    parentEntityName: propRecords.name,
+    originalData: { ...propAddress },
     proposedData: {
-      id: 'e-new-001',
-      name: 'Lab Results',
-      technicalName: 'healthcare.lab_results',
-      description: 'Laboratory test results and associated diagnostic data for patient encounters, including specimen information and result values.',
-      owner: 'Dr. James Park',
-      steward: 'Carla Nguyen',
-      sourceSystem: 'Laboratory Information System',
-      recordCount: '0',
-      refreshFrequency: 'Real-time',
-      classification: 'Restricted',
-      status: 'Active',
-      tags: ['PHI', 'HIPAA', 'Lab'],
-      dataItems: [],
-      qualityScore: 100,
-      retentionPolicy: '10 years per HIPAA minimum',
-      schemaVersion: 'v1.0.0',
-      slaTarget: '99.9% availability',
-      lineageSource: 'LIS → HL7 FHIR → Data Lake',
-      businessGlossaryRef: 'BG-LAB-001',
-      lastUpdated: '2026-06-11 07:45:00',
+      ...propAddress,
+      sensitivityLevel: 'High',
+      validationRule: 'Must include street number, name, city, state, ZIP, and be verified via USPS address validation API',
     },
+    changedFields: ['sensitivityLevel', 'validationRule'],
+  },
+  {
+    id: 'req-002',
+    batchId: 'batch-001',
+    type: 'edit',
+    recordType: 'dataitem',
+    status: 'pending',
+    submittedAt: '2026-06-11T07:46:00Z',
+    submittedBy: 'Dr. James Park',
+    subjectAreaId: housing.id,
+    subjectAreaName: housing.name,
+    parentEntityId: rentalAgreements.id,
+    parentEntityName: rentalAgreements.name,
+    originalData: { ...tenantName },
+    proposedData: { ...tenantName, classification: 'Restricted', steward: 'Jordan Lee' },
+    changedFields: ['classification', 'steward'],
   },
 
-  // ── 2. Edit request: Entity metadata refresh ──────────────────
+  // ── 2. EDIT REQUEST: data items under TWO DIFFERENT entities in Healthcare —
+  // Primary Phone (Patient Demographics) and Diagnosis Code (Clinical Encounters).
   {
     id: 'req-003',
+    batchId: 'batch-002',
     type: 'edit',
-    recordType: 'entity',
+    recordType: 'dataitem',
     status: 'pending',
     submittedAt: '2026-06-11T09:02:00Z',
     submittedBy: 'Alex Kim',
     subjectAreaId: healthcare.id,
     subjectAreaName: healthcare.name,
-    originalData: { ...patientDemo, dataItems: [] },
+    parentEntityId: patientDemo.id,
+    parentEntityName: patientDemo.name,
+    originalData: { ...primaryPhone },
     proposedData: {
-      ...patientDemo,
-      dataItems: [],
-      slaTarget: '99.999% availability, real-time',
-      qualityScore: 99,
-      retentionPolicy: '12 years per updated HIPAA guidance',
-      lastUpdated: '2026-06-11 09:02:00',
+      ...primaryPhone,
+      sensitivityLevel: 'Critical',
+      validationRule: 'Must be valid E.164 format when present; verified via carrier lookup',
     },
-    changedFields: ['slaTarget', 'qualityScore', 'retentionPolicy', 'lastUpdated'],
+    changedFields: ['sensitivityLevel', 'validationRule'],
+  },
+  {
+    id: 'req-003b',
+    batchId: 'batch-002',
+    type: 'edit',
+    recordType: 'dataitem',
+    status: 'pending',
+    submittedAt: '2026-06-11T09:03:00Z',
+    submittedBy: 'Alex Kim',
+    subjectAreaId: healthcare.id,
+    subjectAreaName: healthcare.name,
+    parentEntityId: clinicalEncounters.id,
+    parentEntityName: clinicalEncounters.name,
+    originalData: { ...diagnosisCode },
+    proposedData: {
+      ...diagnosisCode,
+      validationRule: 'Must be valid ICD-10-CM code per CMS code table; auto-validated against current fiscal year code set',
+      lastUpdated: '2026-06-11',
+    },
+    changedFields: ['validationRule', 'lastUpdated'],
   },
 
   // ── 4. Create request: new Data Item ─────────────────────────
   {
     id: 'req-004',
+    batchId: 'batch-003',
     type: 'create',
     recordType: 'dataitem',
     status: 'pending',
@@ -105,6 +138,7 @@ export const initialRequests: ChangeRequest[] = [
   // ── 5. NEW DEMO DATA: Entity with pending children ────────────
   {
     id: 'req-005',
+    batchId: 'batch-004',
     type: 'create',
     recordType: 'entity',
     status: 'pending',
@@ -138,6 +172,7 @@ export const initialRequests: ChangeRequest[] = [
 
   {
     id: 'req-006',
+    batchId: 'batch-004',
     type: 'create',
     recordType: 'dataitem',
     status: 'pending',
@@ -165,6 +200,7 @@ export const initialRequests: ChangeRequest[] = [
 
   {
     id: 'req-007',
+    batchId: 'batch-004',
     type: 'create',
     recordType: 'dataitem',
     status: 'pending',
@@ -199,6 +235,7 @@ export const initialRequests: ChangeRequest[] = [
   // the common-edit scenario the inline change preview is meant to surface.
   ...propRecords.dataItems.slice(0, 5).map((item): ChangeRequest => ({
     id: `req-bulk-${item.id}`,
+    batchId: 'batch-005',
     type: 'edit',
     recordType: 'dataitem',
     status: 'pending',
@@ -276,6 +313,7 @@ export const initialRequests: ChangeRequest[] = [
     },
   ] satisfies Array<{ original: DataItem; proposed: Partial<DataItem>; changedFields: string[] }>).map(({ original, proposed, changedFields }, i): ChangeRequest => ({
     id: `req-ce-${i + 1}`,
+    batchId: 'batch-006',
     type: 'edit',
     recordType: 'dataitem',
     status: 'pending',

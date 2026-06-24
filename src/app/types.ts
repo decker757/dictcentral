@@ -65,14 +65,38 @@ export type RequestRecordType = 'entity' | 'dataitem';
 export type RequestType = 'create' | 'edit';
 export type RequestStatus = 'pending' | 'approved' | 'rejected';
 
+/**
+ * One entry in a review comment thread. Threads accumulate across multiple
+ * reject → revise → resubmit rounds, so an approver (and the board member,
+ * read-only) can see the full back-and-forth, not just the latest note.
+ * Used both for the per-request generic thread and per-entity/data-item
+ * threads — see useCatalog's itemComments/batchComments.
+ */
+export interface Comment {
+  id: string;
+  author: string;
+  text: string;
+  timestamp: string; // ISO date-time string
+}
+
 export interface ChangeRequest {
   id: string;
+  /**
+   * Groups every entity/data-item change submitted together into ONE
+   * reviewable request. Approvers act on the whole batchId at once (accept
+   * or reject everything in it) — they can no longer approve/reject
+   * individual entities or data items within it. See lib/submissions.ts.
+   */
+  batchId: string;
   type: RequestType;
   recordType: RequestRecordType;
   status: RequestStatus;
   submittedAt: string;   // ISO date-time string
   submittedBy: string;
   rejectionReason?: string;
+  /** Who actioned this request (approved/rejected it), and when — set together with status. */
+  reviewedBy?: string;
+  reviewedAt?: string;
 
   // Hierarchy context
   subjectAreaId: string;

@@ -12,3 +12,6 @@ export const KEY_INDICATORS = ['PK', 'FK', 'UK'] as const;
 
 // The board member acting in this in-memory demo (no auth backend).
 export const CURRENT_BOARD_MEMBER = 'Sarah Chen';
+
+// The approver acting in this in-memory demo (no auth backend).
+export const CURRENT_APPROVER = 'Morgan Reyes';

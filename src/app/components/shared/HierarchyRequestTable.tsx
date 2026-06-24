@@ -1,24 +1,29 @@
-// The hierarchical Excel-style approval table — supersedes the old
-// "one flat table per record type" layout. Parent entities and their child
+// The hierarchical Excel-style review table. Parent entities and their child
 // data items render TOGETHER, in one table per entity group, using the exact
 // same column set for both (Entity and DataItem share one attribute schema —
 // see types.ts / fieldSchema.ts), so a reviewer never loses the parent↔child
 // relationship while scanning attributes.
+//
+// Approval is whole-REQUEST only (see useCatalog/SubmissionDetailView) — this
+// table has no per-row Approve/Reject. Instead every row gets its own
+// Comments cell (an approver note tied to that specific entity/data item),
+// and the entity (parent) row is visually distinct from its data-item
+// (child) rows: bold + tinted background at the root, indented + connector
+// line for children, so the hierarchy reads at a glance.
 //
 // Each entity group gets its OWN "Full view" / "Changes only" toggle — scoped
 // to that group's rows, not a global switch — so a reviewer can drill into
 // one entity's edits without hiding columns other groups still need.
 
 import { useState } from 'react';
-import { Check, ArrowRight, Minus, CheckCircle } from 'lucide-react';
-import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
-import { ChangeRequest, Entity, DataItem, SubjectArea } from '../../types';
+import { ArrowRight } from 'lucide-react';
+import { ChangeRequest, Entity, DataItem, SubjectArea, Comment } from '../../types';
 import { SubjectAreaGroup, EntityBlock } from '../../lib/requestGroups';
 import { RECORD_FIELDS } from '../../lib/fieldSchema';
-import { formatValue, isEmptyValue, formatSubmittedAt } from '../../lib/format';
+import { formatValue, isEmptyValue } from '../../lib/format';
 import { getRequestDiff } from './DiffGrid';
-import { OperationBadge, RecordTypeIcon } from '../../lib/badges';
-import { ApproveButton, RejectButton } from '../ui/ActionButton';
+import { RecordTypeIcon } from '../../lib/badges';
+import { CommentThread } from './CommentThread';
 
 // ── Row model — a request row OR a read-only "existing entity" context row,
 // normalized to the same shape so one renderer handles both. ──
@@ -79,12 +84,6 @@ function rowFromName(name: string): Row {
   };
 }
 
-const STATUS_BADGE: Record<ChangeRequest['status'], string> = {
-  pending: 'bg-amber-50 text-amber-700 border-amber-200',
-  approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  rejected: 'bg-red-50 text-red-600 border-red-200',
-};
-
 function FieldValueCell({
   value, originalValue, isChanged, isCreate,
 }: { value: unknown; originalValue?: unknown; isChanged: boolean; isCreate: boolean }) {
@@ -110,30 +109,29 @@ function FieldValueCell({
   );
 }
 
-const CHECKBOX_W = 36;
-const NAME_W = 200;
+const NAME_W = 220;
 const TECH_W = 170;
-const ACTIONS_W = 168;
+const COMMENT_W = 260;
 
 interface GroupTableProps {
   block: EntityBlock;
   subjectAreas: SubjectArea[];
-  selectedIds: Set<string>;
-  onToggleSelect: (id: string) => void;
-  onSelectMany: (ids: string[]) => void;
-  onApprove: (id: string) => void;
-  onReject: (id: string) => void;
-  onRowClick: (req: ChangeRequest) => void;
+  onRowClick?: (req: ChangeRequest) => void;
   onEntityClick?: (entity: Entity) => void;
-  isParentPendingNew: (req: ChangeRequest) => boolean;
+  comments: Record<string, Comment[]>;
+  drafts: Record<string, string>;
+  onDraftChange: (requestId: string, text: string) => void;
+  /** Board member view: comments are the approver's notes, shown but not editable. */
+  readOnly?: boolean;
 }
 
 function EntityGroupTable({
-  block, subjectAreas, selectedIds, onToggleSelect, onSelectMany,
-  onApprove, onReject, onRowClick, onEntityClick, isParentPendingNew,
+  block, subjectAreas, onRowClick, onEntityClick, comments, drafts, onDraftChange, readOnly,
 }: GroupTableProps) {
-  // Per-group toggle — scoped to this entity's table only.
-  const [changesOnly, setChangesOnly] = useState(true);
+  // Per-group toggle — scoped to this entity's table only. Defaults to the
+  // full attribute view; "Changes Only" is an explicit, named choice.
+  const [viewMode, setViewMode] = useState<'full' | 'changes'>('full');
+  const changesOnly = viewMode === 'changes';
 
   let parentRow: Row;
   if (block.kind === 'entityRequest') {
@@ -152,78 +150,81 @@ function EntityGroupTable({
 
   const childRows = block.children.map(rowFromRequest);
 
+  // The subject area this entity group lives in — shown on the group header
+  // so a reviewer scanning a request that spans multiple subject areas
+  // always knows which one a given entity belongs to.
+  const subjectAreaName = block.kind === 'entityRequest'
+    ? block.request.subjectAreaName
+    : block.children[0]?.subjectAreaName;
+
   const otherFields = RECORD_FIELDS.filter(f => f.key !== 'name' && f.key !== 'technicalName');
-  // "Changes only" still narrows down to what's relevant, but the parent
-  // entity's own filled-in attributes are always shown regardless of the
-  // toggle — only the children's columns actually get filtered down.
+  // "Changes only" shows ONLY columns that actually changed (or, for a new
+  // record, columns that actually have a value) — applied evenly to the
+  // parent row too, so an unchanged-but-filled-in parent attribute no longer
+  // gets a free pass into view.
   const visibleFields = changesOnly
     ? otherFields.filter(f => {
         const key = f.key as string;
-        if (!isEmptyValue(parentRow.values[key])) return true;
-        return childRows.some(r => (r.isCreate ? !isEmptyValue(r.values[key]) : r.changedSet.has(key)));
+        const parentChanged = !parentRow.isContext && (parentRow.isCreate ? !isEmptyValue(parentRow.values[key]) : parentRow.changedSet.has(key));
+        const childChanged = childRows.some(r => (r.isCreate ? !isEmptyValue(r.values[key]) : r.changedSet.has(key)));
+        return parentChanged || childChanged;
       })
     : otherFields;
 
-  const pendingChildIds = childRows.filter(r => r.status === 'pending').map(r => r.id);
-  const selectedChildCount = pendingChildIds.filter(id => selectedIds.has(id)).length;
-  const childSelectAllChecked: boolean | 'indeterminate' = selectedChildCount === 0
-    ? false
-    : selectedChildCount === pendingChildIds.length ? true : 'indeterminate';
-
-  const nameLeft = CHECKBOX_W;
+  const nameLeft = 0;
   const techLeft = nameLeft + NAME_W;
 
   const handleParentClick = () => {
     if (parentRow.isContext) {
       if (parentRow.entityForModal && onEntityClick) onEntityClick(parentRow.entityForModal);
-    } else if (parentRow.request) {
+    } else if (parentRow.request && onRowClick) {
       onRowClick(parentRow.request);
     }
   };
 
-  const renderRow = (row: Row) => {
-    const isPending = row.status === 'pending';
-    const isSelected = selectedIds.has(row.id);
+  // depth 0 = the entity (parent) row itself; depth 1 = a nested data-item row.
+  // This is the actual parent↔child signal — NOT `isContext` (which only
+  // distinguishes "unchanged entity header" from "entity is itself a
+  // request") so an entity-create/edit row never gets mistaken for a child.
+  const renderRow = (row: Row, depth: 0 | 1) => {
+    const isChild = depth === 1;
+    // Fully opaque backgrounds — these cells are STICKY (Name/Tech/Comments
+    // columns stay pinned while the row scrolls horizontally underneath
+    // them), so any transparency here lets the scrolled-away columns show
+    // through the frozen ones. Solid color only.
     const rowBg = row.isContext
-      ? 'bg-gray-50/70'
-      : isSelected ? 'bg-blue-50' : row.status && row.status !== 'pending' ? 'bg-gray-50/50' : 'bg-white';
-    const disableApprove = row.request ? isParentPendingNew(row.request) : false;
+      ? 'bg-gray-50'
+      : !isChild
+        ? 'bg-purple-50'
+        : row.status && row.status !== 'pending' ? 'bg-gray-50' : 'bg-white';
     const techValue = row.values['technicalName'];
-    const clickable = row.isContext ? !!parentRow.entityForModal : true;
+    const clickable = row.isContext ? !!parentRow.entityForModal : !!onRowClick;
 
     return (
       <tr
         key={row.id}
-        className={`${rowBg} ${clickable ? 'hover:bg-blue-50/30 cursor-pointer' : ''} transition-colors group`}
+        className={`${rowBg} ${clickable ? 'hover:bg-blue-50 cursor-pointer' : ''} transition-colors group`}
         onClick={() => {
           if (row.isContext) handleParentClick();
-          else if (row.request) onRowClick(row.request);
+          else if (row.request && onRowClick) onRowClick(row.request);
         }}
       >
         <td
-          className={`sticky z-10 ${rowBg} border-b border-r border-gray-100 px-2 py-2`}
-          style={{ left: 0, width: CHECKBOX_W }}
-          onClick={e => e.stopPropagation()}
-        >
-          {!row.isContext && isPending && (
-            <CheckboxPrimitive.Root
-              checked={isSelected}
-              onCheckedChange={() => onToggleSelect(row.id)}
-              className="w-4 h-4 rounded border border-gray-300 bg-white flex items-center justify-center data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-            >
-              <CheckboxPrimitive.Indicator>
-                <Check className="w-3 h-3 text-white" strokeWidth={3} />
-              </CheckboxPrimitive.Indicator>
-            </CheckboxPrimitive.Root>
-          )}
-        </td>
-        <td
-          className={`sticky z-10 ${rowBg} border-b border-r border-gray-100 px-3 py-2 font-medium text-gray-800`}
+          className={`sticky z-10 ${rowBg} border-b border-r border-gray-100 px-3 py-2 ${!isChild ? 'font-semibold text-gray-900' : 'font-medium text-gray-700'}`}
           style={{ left: nameLeft, width: NAME_W }}
         >
-          <div className="flex items-center gap-1.5 min-w-0" style={{ paddingLeft: row.isContext ? 0 : 14 }}>
-            <RecordTypeIcon type={row.recordType} size="xs" boxless muted={row.isContext} />
-            <span className={`truncate ${clickable ? 'group-hover:text-blue-700 group-hover:underline' : ''} ${row.isContext ? 'text-gray-600' : ''}`}>
+          <div className="flex items-center min-w-0">
+            {/* Tree connector for child rows — a vertical rail + corner tick,
+                so the entity→data-item relationship reads as a literal tree,
+                not just extra whitespace. */}
+            {isChild && (
+              <span className="relative flex-shrink-0" style={{ width: 28, height: 20 }} aria-hidden="true">
+                <span className="absolute left-3 top-0 bottom-0 w-px bg-gray-300" />
+                <span className="absolute left-3 top-1/2 w-3 h-px bg-gray-300" />
+              </span>
+            )}
+            <RecordTypeIcon type={row.recordType} size="xs" boxless muted={row.isContext} className="flex-shrink-0" />
+            <span className={`truncate ml-1.5 ${clickable ? 'group-hover:text-blue-700 group-hover:underline' : ''} ${row.isContext ? 'text-gray-600' : ''}`}>
               {row.name}
             </span>
           </div>
@@ -233,24 +234,6 @@ function EntityGroupTable({
           style={{ left: techLeft, width: TECH_W }}
         >
           {formatValue(techValue)}
-        </td>
-        <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap">
-          {row.isContext
-            ? <span className="text-[11px] text-gray-400 font-medium">Unchanged</span>
-            : <OperationBadge operation={row.request!.type} />}
-        </td>
-        <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap">
-          {row.status && (
-            <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium border capitalize ${STATUS_BADGE[row.status]}`}>
-              {row.status}
-            </span>
-          )}
-        </td>
-        <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap text-gray-500">
-          {row.request ? (row.request.submittedBy || 'Unknown') : '—'}
-        </td>
-        <td className="border-b border-gray-100 px-3 py-2 whitespace-nowrap text-gray-500">
-          {row.request ? formatSubmittedAt(row.request.submittedAt) : '—'}
         </td>
         {visibleFields.map(f => {
           const key = f.key as string;
@@ -266,18 +249,22 @@ function EntityGroupTable({
           );
         })}
         <td
-          className={`sticky right-0 z-10 ${rowBg} border-b border-gray-100 px-2 py-2 shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
-          style={{ width: ACTIONS_W }}
+          className={`sticky right-0 z-10 ${rowBg} border-b border-gray-100 px-2 py-1.5 align-top shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
+          style={{ width: COMMENT_W }}
           onClick={e => e.stopPropagation()}
         >
-          {!row.isContext && isPending ? (
-            <div className="flex items-center gap-1.5">
-              <ApproveButton size="sm" onClick={() => onApprove(row.id)} locked={disableApprove} className="px-2.5" />
-              <RejectButton size="sm" onClick={() => onReject(row.id)} className="px-2.5" />
-            </div>
-          ) : !row.isContext ? (
-            <span className="text-[11px] text-gray-400">No actions</span>
-          ) : null}
+          {!row.isContext ? (
+            <CommentThread
+              comments={comments[row.id] ?? []}
+              readOnly={readOnly}
+              draft={drafts[row.id] ?? ''}
+              onDraftChange={readOnly ? undefined : text => onDraftChange(row.id, text)}
+              placeholder="Add a comment…"
+              compact
+            />
+          ) : (
+            <span className="text-[11px] text-gray-400">—</span>
+          )}
         </td>
       </tr>
     );
@@ -285,69 +272,62 @@ function EntityGroupTable({
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-      {/* Group header: identity + per-group toggle */}
+      {/* Group header: identity only — no select-all (whole request is the
+          unit of approval, so per-entity bulk-select no longer applies). */}
       <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200 flex-wrap">
         <div className="flex items-center gap-2.5 min-w-0">
-          {pendingChildIds.length > 0 && (
-            <CheckboxPrimitive.Root
-              checked={childSelectAllChecked}
-              onCheckedChange={() => onSelectMany(pendingChildIds)}
-              aria-label={`Select all ${pendingChildIds.length} pending data item changes under ${parentRow.name}`}
-              className="w-4 h-4 rounded border border-gray-300 bg-white flex items-center justify-center flex-shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-blue-600 data-[state=indeterminate]:border-blue-600"
-            >
-              <CheckboxPrimitive.Indicator>
-                {childSelectAllChecked === 'indeterminate'
-                  ? <Minus className="w-3 h-3 text-white" strokeWidth={3} />
-                  : <CheckCircle className="w-3 h-3 text-white" strokeWidth={3} />}
-              </CheckboxPrimitive.Indicator>
-            </CheckboxPrimitive.Root>
-          )}
           <RecordTypeIcon type="entity" size="sm" muted={parentRow.isContext} />
           <span className="text-sm font-semibold text-gray-800 truncate">{parentRow.name}</span>
+          {subjectAreaName && (
+            <span className="text-[11px] font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full flex-shrink-0">
+              {subjectAreaName}
+            </span>
+          )}
           {parentRow.isContext && <span className="text-xs font-medium text-gray-400 flex-shrink-0">unchanged</span>}
           <span className="text-xs text-gray-400 flex-shrink-0">
             {childRows.length} data item{childRows.length !== 1 ? 's' : ''}
           </span>
         </div>
-        <button
-          onClick={() => setChangesOnly(v => !v)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors flex-shrink-0 ${
-            changesOnly ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
-          }`}
-          title="Toggle between all attribute columns and only the ones changed in this entity's group"
-        >
-          {changesOnly ? 'Changes only' : 'Full view'}
-        </button>
+        <div className="flex rounded-md border border-gray-200 overflow-hidden bg-white text-xs flex-shrink-0">
+          <button
+            onClick={() => setViewMode('full')}
+            className={`px-2.5 py-1 font-medium transition-colors ${viewMode === 'full' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+          >
+            Full View
+          </button>
+          <button
+            onClick={() => setViewMode('changes')}
+            className={`px-2.5 py-1 font-medium transition-colors ${viewMode === 'changes' ? 'bg-amber-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+            title="Show only the columns that actually changed, with the old value crossed out and the new value highlighted"
+          >
+            Changes Only
+          </button>
+        </div>
       </div>
 
       <div className="overflow-auto max-h-[60vh]">
         <table className="border-separate text-xs w-full" style={{ borderSpacing: 0 }}>
           <thead>
             <tr>
-              <th className="sticky top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-2 py-2 text-left" style={{ left: 0, width: CHECKBOX_W, minWidth: CHECKBOX_W }} />
               <th className="sticky top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap" style={{ left: nameLeft, width: NAME_W, minWidth: NAME_W }}>
                 Business Name
               </th>
               <th className="sticky top-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[3px_0_5px_-3px_rgba(0,0,0,0.12)]" style={{ left: techLeft, width: TECH_W, minWidth: TECH_W }}>
                 Technical Name
               </th>
-              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Operation</th>
-              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Status</th>
-              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Submitted By</th>
-              <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Submitted At</th>
               {visibleFields.map(f => (
                 <th key={f.key as string} className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap" style={{ minWidth: 160, maxWidth: 280 }}>
                   {f.label}
                 </th>
               ))}
-              <th className="sticky top-0 right-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.12)]" style={{ width: ACTIONS_W, minWidth: ACTIONS_W }}>
-                Actions
+              <th className="sticky top-0 right-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[-3px_0_5px_-3px_rgba(0,0,0,0.12)]" style={{ width: COMMENT_W, minWidth: COMMENT_W }}>
+                Comments
               </th>
             </tr>
           </thead>
           <tbody>
-            {renderRow(parentRow)}
-            {childRows.map(renderRow)}
+            {renderRow(parentRow, 0)}
+            {childRows.map(row => renderRow(row, 1))}
           </tbody>
         </table>
       </div>
@@ -363,20 +343,16 @@ function EntityGroupTable({
 interface HierarchyRequestTableProps {
   groups: SubjectAreaGroup[];
   subjectAreas: SubjectArea[];
-  selectedIds: Set<string>;
-  onToggleSelect: (id: string) => void;
-  onSelectMany: (ids: string[]) => void;
-  onApprove: (id: string) => void;
-  onReject: (id: string) => void;
-  onRowClick: (req: ChangeRequest) => void;
+  onRowClick?: (req: ChangeRequest) => void;
   onEntityClick?: (entity: Entity) => void;
-  isParentPendingNew: (req: ChangeRequest) => boolean;
+  comments: Record<string, Comment[]>;
+  drafts: Record<string, string>;
+  onDraftChange: (requestId: string, text: string) => void;
+  readOnly?: boolean;
 }
 
 export function HierarchyRequestTable({
-  groups, subjectAreas,
-  selectedIds, onToggleSelect, onSelectMany, onApprove, onReject,
-  onRowClick, onEntityClick, isParentPendingNew,
+  groups, subjectAreas, onRowClick, onEntityClick, comments, drafts, onDraftChange, readOnly,
 }: HierarchyRequestTableProps) {
   // Flattened — no subject-area grouping/header; just one entity group after
   // another, each its own self-contained parent+children table.
@@ -389,14 +365,12 @@ export function HierarchyRequestTable({
           key={block.kind === 'entityRequest' ? block.request.id : `ee-${block.entityName}`}
           block={block}
           subjectAreas={subjectAreas}
-          selectedIds={selectedIds}
-          onToggleSelect={onToggleSelect}
-          onSelectMany={onSelectMany}
-          onApprove={onApprove}
-          onReject={onReject}
           onRowClick={onRowClick}
           onEntityClick={onEntityClick}
-          isParentPendingNew={isParentPendingNew}
+          comments={comments}
+          drafts={drafts}
+          onDraftChange={onDraftChange}
+          readOnly={readOnly}
         />
       ))}
     </div>

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { BookOpen, Plus, LayoutList, GitBranch, Edit2, LogOut, ClipboardList } from 'lucide-react';
-import { SubjectArea, Entity, DataItem } from './types';
+import { SubjectArea, Entity, DataItem, ChangeRequest, RecordAttributes } from './types';
 import { LandingPage } from './LandingPage';
 import { ApproverPortal } from './ApproverPortal';
 import { TreeView } from './components/TreeView';
@@ -11,23 +11,28 @@ import { DataItemModal } from './components/modals/DataItemModal';
 import { AdvancedSearchModal } from './components/modals/AdvancedSearchModal';
 import { CreateModal } from './components/modals/CreateModal';
 import { EditModal } from './components/modals/EditModal';
+import { RequestDetailModal } from './components/modals/RequestDetailModal';
+import { BoardRequestCard } from './components/BoardRequestCard';
+import { SubmissionDetailView } from './components/SubmissionDetailView';
+import { ReviseSubmissionView } from './components/ReviseSubmissionView';
 import { useCatalog } from './hooks/useCatalog';
-import { countEntities, countDataItems, countMatches } from './lib/catalog';
+import { countEntities, countDataItems, countMatches, findEntityById } from './lib/catalog';
 import { CURRENT_BOARD_MEMBER } from './lib/constants';
-import { RequestGroupList } from './components/shared/RequestGroupList';
 import { TypeLegend } from './lib/badges';
-import { groupRequestsBySubjectArea } from './lib/requestGroups';
+import { groupRequestsByBatch, Submission } from './lib/submissions';
+import { buildSubmissionCsv, downloadTextFile } from './lib/exportCsv';
 import { Toaster } from 'sonner';
 
 type Role = 'selection' | 'board' | 'approver';
 type Tab = 'tree' | 'table';
 
 type ModalState =
-  | { type: 'entity'; entity: Entity; subjectArea: SubjectArea }
-  | { type: 'dataItem'; dataItem: DataItem; entity: Entity; subjectArea: SubjectArea }
+  | { type: 'entity'; entity: Entity; subjectArea: SubjectArea; readOnly?: boolean }
+  | { type: 'dataItem'; dataItem: DataItem; entity: Entity; subjectArea: SubjectArea; readOnly?: boolean }
   | { type: 'advancedSearch' }
   | { type: 'create' }
   | { type: 'edit' }
+  | { type: 'requestDetail'; request: ChangeRequest }
   | null;
 
 export default function App() {
@@ -35,12 +40,14 @@ export default function App() {
   const {
     subjectAreas, requests,
     submitCreateEntity, submitCreateDataItem, submitEditEntity, submitEditDataItem,
-    approve, reject,
+    approve, reject, reviseAndResubmit,
+    itemComments, addItemComment, batchComments, addBatchComment,
   } = useCatalog();
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [boardTab, setBoardTab] = useState<'catalog' | 'requests'>('catalog');
   const [myReqFilter, setMyReqFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
-  const [boardCollapsedGroups, setBoardCollapsedGroups] = useState<Set<string>>(new Set());
+  const [openBoardBatchId, setOpenBoardBatchId] = useState<string | null>(null);
+  const [revisingBatchId, setRevisingBatchId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -55,26 +62,42 @@ export default function App() {
     setModal({ type: 'entity', entity, subjectArea });
   const openDataItem = (dataItem: DataItem, entity: Entity, subjectArea: SubjectArea) =>
     setModal({ type: 'dataItem', dataItem, entity, subjectArea });
+  /** My Requests' table only has the Entity for an unchanged-entity context row — resolve its SubjectArea and open read-only (this is a history view, not an edit entry point). */
+  const handleHierarchyEntityClick = (entity: Entity) => {
+    const found = findEntityById(subjectAreas, entity.id);
+    if (found) setModal({ type: 'entity', entity: found.entity, subjectArea: found.subjectArea, readOnly: true });
+  };
+  const openRequestDetail = (request: ChangeRequest) => setModal({ type: 'requestDetail', request });
 
   // ── Stats ────────────────────────────────────────────────────
   const totalEntities = countEntities(subjectAreas);
   const totalDataItems = countDataItems(subjectAreas);
-  // Board members track *their own* submissions, not the global queue.
+  // Board members track *their own* submissions, not the global queue —
+  // grouped into requests (one card per batchId), same unit the approver acts on.
   const myRequests = useMemo(() => requests.filter(r => r.submittedBy === CURRENT_BOARD_MEMBER), [requests]);
-  const myPendingCount = myRequests.filter(r => r.status === 'pending').length;
-  const myApprovedCount = myRequests.filter(r => r.status === 'approved').length;
-  const myRejectedCount = myRequests.filter(r => r.status === 'rejected').length;
-  const myFilteredRequests = useMemo(
-    () => myRequests.filter(r => r.status === myReqFilter).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
-    [myRequests, myReqFilter],
+  const myAllSubmissions = useMemo(() => groupRequestsByBatch(myRequests), [myRequests]);
+  const myPendingCount = myAllSubmissions.filter(s => s.status === 'pending').length;
+  const myApprovedCount = myAllSubmissions.filter(s => s.status === 'approved').length;
+  const myRejectedCount = myAllSubmissions.filter(s => s.status === 'rejected').length;
+  const myFilteredSubmissions = useMemo(
+    () => myAllSubmissions.filter(s => s.status === myReqFilter),
+    [myAllSubmissions, myReqFilter],
   );
-  const myGroups = useMemo(() => groupRequestsBySubjectArea(myFilteredRequests), [myFilteredRequests]);
-  const toggleBoardGroup = (name: string) =>
-    setBoardCollapsedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
-      return next;
-    });
+  const openBoardSubmission: Submission | undefined = openBoardBatchId
+    ? myAllSubmissions.find(s => s.batchId === openBoardBatchId)
+    : undefined;
+  const handleExportSubmission = (submission: Submission) => {
+    const csv = buildSubmissionCsv(submission.items, itemComments, batchComments[submission.batchId] ?? []);
+    downloadTextFile(`request-${submission.batchId}.csv`, csv);
+  };
+  /** Open a board request: always lands on the read-only detail view, never mid-revise. */
+  const openBoardRequest = (batchId: string | null) => { setOpenBoardBatchId(batchId); setRevisingBatchId(null); };
+  const handleResubmit = (batchId: string, drafts: Record<string, Partial<RecordAttributes>>) => {
+    reviseAndResubmit(batchId, drafts);
+    setRevisingBatchId(null);
+    setOpenBoardBatchId(null);
+    setMyReqFilter('pending');
+  };
   const treeMatchCount = useMemo(() => countMatches(subjectAreas, searchQuery), [subjectAreas, searchQuery]);
 
   // ── Role routing ─────────────────────────────────────────────
@@ -91,6 +114,10 @@ export default function App() {
           onApprove={approve}
           onReject={reject}
           onLeave={() => setRole('selection')}
+          itemComments={itemComments}
+          onAddItemComment={addItemComment}
+          batchComments={batchComments}
+          onAddBatchComment={addBatchComment}
         />
         <Toaster richColors position="bottom-right" />
       </>
@@ -245,55 +272,87 @@ export default function App() {
 
         {boardTab === 'requests' && (
           <div className="flex flex-col gap-5 pb-12">
-            <div className="flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-gray-900">My Requests</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Track the status of the changes you submitted for approval</p>
-              </div>
-              <div className="flex items-center gap-4 text-sm text-gray-500 flex-shrink-0">
-                <span><span className="font-semibold text-amber-600">{myPendingCount}</span> pending</span>
-                <span><span className="font-semibold text-emerald-600">{myApprovedCount}</span> approved</span>
-                <span><span className="font-semibold text-red-600">{myRejectedCount}</span> rejected</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {(['pending', 'approved', 'rejected'] as const).map(f => (
-                <button
-                  key={f}
-                  onClick={() => setMyReqFilter(f)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
-                    myReqFilter === f
-                      ? 'bg-gray-900 text-white'
-                      : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  {f}
-                  {f === 'pending' && myPendingCount > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">{myPendingCount}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {myFilteredRequests.length === 0 ? (
-              <div className="text-center py-20 text-gray-400">
-                <ClipboardList className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                <div className="text-sm font-medium capitalize">No {myReqFilter} requests</div>
-                <div className="text-xs mt-1">
-                  {myReqFilter === 'pending'
-                    ? 'Nothing awaiting approval — use Create or Edit to submit a change'
-                    : `You have no ${myReqFilter} requests yet`}
+            {!openBoardSubmission && (
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-gray-900">My Requests</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Track the status of the changes you submitted for approval</p>
+                </div>
+                <div className="flex items-center gap-4 text-sm text-gray-500 flex-shrink-0">
+                  <span><span className="font-semibold text-amber-600">{myPendingCount}</span> pending</span>
+                  <span><span className="font-semibold text-emerald-600">{myApprovedCount}</span> approved</span>
+                  <span><span className="font-semibold text-red-600">{myRejectedCount}</span> rejected</span>
                 </div>
               </div>
+            )}
+
+            {openBoardSubmission ? (
+              revisingBatchId === openBoardSubmission.batchId ? (
+                <ReviseSubmissionView
+                  submission={openBoardSubmission}
+                  subjectAreas={subjectAreas}
+                  itemComments={itemComments}
+                  genericComments={batchComments[openBoardSubmission.batchId] ?? []}
+                  onBack={() => setRevisingBatchId(null)}
+                  onResubmit={drafts => handleResubmit(openBoardSubmission.batchId, drafts)}
+                />
+              ) : (
+                <SubmissionDetailView
+                  submission={openBoardSubmission}
+                  subjectAreas={subjectAreas}
+                  onBack={() => openBoardRequest(null)}
+                  onEntityClick={handleHierarchyEntityClick}
+                  onRowClick={openRequestDetail}
+                  itemComments={itemComments}
+                  genericComments={batchComments[openBoardSubmission.batchId] ?? []}
+                  readOnly
+                  onExport={() => handleExportSubmission(openBoardSubmission)}
+                  onEdit={openBoardSubmission.status === 'rejected' ? () => setRevisingBatchId(openBoardSubmission.batchId) : undefined}
+                />
+              )
             ) : (
-              <RequestGroupList
-                groups={myGroups}
-                subjectAreas={subjectAreas}
-                collapsedGroups={boardCollapsedGroups}
-                onToggleGroup={toggleBoardGroup}
-                readOnly
-              />
+              <>
+                <div className="flex items-center gap-2">
+                  {(['pending', 'approved', 'rejected'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setMyReqFilter(f)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
+                        myReqFilter === f
+                          ? 'bg-gray-900 text-white'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {f}
+                      {f === 'pending' && myPendingCount > 0 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">{myPendingCount}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {myFilteredSubmissions.length === 0 ? (
+                  <div className="text-center py-20 text-gray-400">
+                    <ClipboardList className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                    <div className="text-sm font-medium capitalize">No {myReqFilter} requests</div>
+                    <div className="text-xs mt-1">
+                      {myReqFilter === 'pending'
+                        ? 'Nothing awaiting approval — use Create or Edit to submit a change'
+                        : `You have no ${myReqFilter} requests yet`}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    {myFilteredSubmissions.map(submission => (
+                      <BoardRequestCard
+                        key={submission.batchId}
+                        submission={submission}
+                        onOpen={() => openBoardRequest(submission.batchId)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -315,8 +374,9 @@ export default function App() {
           entity={modal.entity}
           subjectArea={modal.subjectArea}
           onClose={() => setModal(null)}
-          onDataItemClick={(di, e, sa) => setModal({ type: 'dataItem', dataItem: di, entity: e, subjectArea: sa })}
-          onUpdate={handleEditEntity}
+          onDataItemClick={(di, e, sa) => setModal({ type: 'dataItem', dataItem: di, entity: e, subjectArea: sa, readOnly: modal.readOnly })}
+          onUpdate={modal.readOnly ? () => {} : handleEditEntity}
+          readOnly={modal.readOnly}
         />
       )}
       {modal?.type === 'dataItem' && (
@@ -325,8 +385,9 @@ export default function App() {
           entity={modal.entity}
           subjectArea={modal.subjectArea}
           onClose={() => setModal(null)}
-          onEntityClick={(e, sa) => setModal({ type: 'entity', entity: e, subjectArea: sa })}
-          onUpdate={handleEditDataItem}
+          onEntityClick={(e, sa) => setModal({ type: 'entity', entity: e, subjectArea: sa, readOnly: modal.readOnly })}
+          onUpdate={modal.readOnly ? () => {} : handleEditDataItem}
+          readOnly={modal.readOnly}
         />
       )}
       {modal?.type === 'advancedSearch' && (
@@ -352,6 +413,12 @@ export default function App() {
           onClose={() => setModal(null)}
           onUpdateEntity={handleEditEntity}
           onUpdateDataItem={handleEditDataItem}
+        />
+      )}
+      {modal?.type === 'requestDetail' && (
+        <RequestDetailModal
+          request={modal.request}
+          onClose={() => setModal(null)}
         />
       )}
 

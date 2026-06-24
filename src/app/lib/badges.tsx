@@ -159,14 +159,15 @@ export function RecordTypeIcon({
 //
 // Signals what KIND of change a request is — by color AND icon, so the operation
 // reads at a glance without a field counter (the diff grid shows the specifics on
-// expand). Plus/green = additive (create), pencil/amber = modify (edit),
-// trash/red = removal (delete). Mirrors the semantic palette in CLAUDE.md.
+// expand). Plus/green = additive (create), pencil/purple = modify (edit) —
+// purple rather than amber so it never blends into an amber "Pending" status
+// badge sitting right next to it — trash/red = removal (delete).
 
 export type Operation = 'create' | 'edit' | 'delete';
 
 const OPERATION_BADGE: Record<Operation, { label: string; cls: string; Icon: LucideIcon }> = {
   create: { label: 'Create', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: Plus },
-  edit:   { label: 'Edit',   cls: 'bg-amber-50 text-amber-700 border-amber-200',        Icon: Pencil },
+  edit:   { label: 'Edit',   cls: 'bg-purple-50 text-purple-700 border-purple-200',     Icon: Pencil },
   delete: { label: 'Delete', cls: 'bg-red-50 text-red-700 border-red-200',              Icon: Trash2 },
 };
 

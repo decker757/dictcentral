@@ -1,27 +1,25 @@
 import { useState, useMemo } from 'react';
-import { BookOpen, CheckSquare, GitBranch, LayoutList, LogOut, Bell, Check, Search, Play, Rows3, Table2 } from 'lucide-react';
-import { SubjectArea, Entity, DataItem, ChangeRequest } from './types';
+import { BookOpen, CheckSquare, GitBranch, LayoutList, LogOut, Bell, Check, Search, Play } from 'lucide-react';
+import { SubjectArea, Entity, DataItem, ChangeRequest, Comment } from './types';
 import { TreeView } from './components/TreeView';
 import { TableView } from './components/TableView';
 import { SearchBar } from './components/SearchBar';
 import { EntityModal } from './components/modals/EntityModal';
 import { DataItemModal } from './components/modals/DataItemModal';
 import { AdvancedSearchModal } from './components/modals/AdvancedSearchModal';
-import { RequestDetailModal } from './components/modals/RequestDetailModal';
-import { RequestGroupList } from './components/shared/RequestGroupList';
-import { HierarchyRequestTable } from './components/shared/HierarchyRequestTable';
+import { SubmissionCard } from './components/SubmissionCard';
+import { SubmissionDetailView } from './components/SubmissionDetailView';
 import { FocusModeView } from './components/FocusModeView';
+import { RequestDetailModal } from './components/modals/RequestDetailModal';
 import { RejectDialog } from './components/shared/RejectDialog';
 import { countDataItems, countMatches, findEntityById } from './lib/catalog';
 import { TypeLegend } from './lib/badges';
-import { groupRequestsBySubjectArea } from './lib/requestGroups';
+import { groupRequestsByBatch, Submission } from './lib/submissions';
 import { ApproveButton, RejectButton } from './components/ui/ActionButton';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
-import { toast } from 'sonner';
 
 type Tab = 'home' | 'requests';
 type HomeView = 'tree' | 'table';
-type RequestsView = 'card' | 'table';
 
 type ModalState =
   | { type: 'entity'; entity: Entity; subjectArea: SubjectArea }
@@ -33,13 +31,18 @@ type ModalState =
 interface ApproverPortalProps {
   subjectAreas: SubjectArea[];
   requests: ChangeRequest[];
-  onApprove: (requestId: string) => void;
-  onReject: (requestId: string, reason: string) => void;
+  onApprove: (batchId: string) => void;
+  onReject: (batchId: string, reason: string) => void;
   onLeave: () => void;
+  itemComments: Record<string, Comment[]>;
+  onAddItemComment: (requestId: string, text: string) => void;
+  batchComments: Record<string, Comment[]>;
+  onAddBatchComment: (batchId: string, text: string) => void;
 }
 
 export function ApproverPortal({
   subjectAreas, requests, onApprove, onReject, onLeave,
+  itemComments, onAddItemComment, batchComments, onAddBatchComment,
 }: ApproverPortalProps) {
   const [tab, setTab] = useState<Tab>('home');
   const [homeView, setHomeView] = useState<HomeView>('tree');
@@ -47,48 +50,73 @@ export function ApproverPortal({
   const [modal, setModal] = useState<ModalState>(null);
   const [reqFilter, setReqFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Requests tab: list of requests (one card per batch) → click into one for
+  // the full Excel-style table. Only ONE request is open at a time.
+  const [openBatchId, setOpenBatchId] = useState<string | null>(null);
+
+  // Unsent drafts for the OPEN request's comments — one commit point
+  // (Approve/Reject), not a per-comment submit button. Cleared whenever a
+  // different request is opened/closed so drafts never leak between requests.
+  const [openItemDrafts, setOpenItemDrafts] = useState<Record<string, string>>({});
+  const [openGenericDraft, setOpenGenericDraft] = useState('');
+
+  const openSubmissionView = (batchId: string | null) => {
+    setOpenBatchId(batchId);
+    setOpenItemDrafts({});
+    setOpenGenericDraft('');
+  };
+
+  const flushOpenDrafts = (batchId: string) => {
+    Object.entries(openItemDrafts).forEach(([requestId, text]) => {
+      if (text.trim()) onAddItemComment(requestId, text);
+    });
+    if (openGenericDraft.trim()) onAddBatchComment(batchId, openGenericDraft);
+    setOpenItemDrafts({});
+    setOpenGenericDraft('');
+  };
+
+  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
 
   // List controls
   const [listSearch, setListSearch] = useState('');
   const [listTypeFilter, setListTypeFilter] = useState<'all' | 'create' | 'edit'>('all');
   const [listSaFilter, setListSaFilter] = useState('');
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-
-  // Requests tab: hierarchical Excel-style table (default) vs the grouped card view.
-  const [reqViewMode, setReqViewMode] = useState<RequestsView>('table');
 
   // Focus mode
   const [focusMode, setFocusMode] = useState(false);
   const [focusQueueIds, setFocusQueueIds] = useState<string[]>([]);
 
-  // Reject dialog state (which requests are being rejected; reason lives in RejectDialog)
-  const [rejectingIds, setRejectingIds] = useState<string[] | null>(null);
+  // Reject dialog state — which batchIds are being rejected (reason lives in RejectDialog)
+  const [rejectingBatchIds, setRejectingBatchIds] = useState<string[] | null>(null);
 
-  const pending = requests.filter(r => r.status === 'pending');
-  const approved = requests.filter(r => r.status === 'approved');
-  const rejected = requests.filter(r => r.status === 'rejected');
+  const allSubmissions = useMemo(() => groupRequestsByBatch(requests), [requests]);
 
-  const displayRequests = useMemo(() => {
-    if (reqFilter === 'approved') return approved;
-    if (reqFilter === 'rejected') return rejected;
-    return pending;
-  }, [reqFilter, pending, approved, rejected]);
+  const pendingSubmissions = allSubmissions.filter(s => s.status === 'pending');
+  const approvedSubmissions = allSubmissions.filter(s => s.status === 'approved');
+  const rejectedSubmissions = allSubmissions.filter(s => s.status === 'rejected');
 
-  // Apply list search + type + subject-area filters
-  const filteredDisplayRequests = useMemo(() => {
+  const displaySubmissions = useMemo(() => {
+    if (reqFilter === 'approved') return approvedSubmissions;
+    if (reqFilter === 'rejected') return rejectedSubmissions;
+    return pendingSubmissions;
+  }, [reqFilter, pendingSubmissions, approvedSubmissions, rejectedSubmissions]);
+
+  // Apply list search + type + subject-area filters (a submission matches if
+  // ANY of its items match — the filters narrow down WHICH requests to show,
+  // not which rows inside a request).
+  const filteredSubmissions = useMemo(() => {
     const term = listSearch.toLowerCase().trim();
-    return displayRequests.filter(r => {
-      const name = (r.proposedData as Entity | DataItem).name.toLowerCase();
-      if (term && !name.includes(term)) return false;
-      if (listTypeFilter !== 'all' && r.type !== listTypeFilter) return false;
-      if (listSaFilter && r.subjectAreaName !== listSaFilter) return false;
+    return displaySubmissions.filter(s => {
+      if (term) {
+        const nameMatch = s.items.some(r => (r.proposedData as Entity | DataItem).name.toLowerCase().includes(term));
+        const byMatch = s.submittedBy.toLowerCase().includes(term);
+        if (!nameMatch && !byMatch) return false;
+      }
+      if (listTypeFilter !== 'all' && !s.items.some(r => r.type === listTypeFilter)) return false;
+      if (listSaFilter && !s.subjectAreaNames.includes(listSaFilter)) return false;
       return true;
     });
-  }, [displayRequests, listSearch, listTypeFilter, listSaFilter]);
-
-  // Hierarchical table view groups by subject area → parent entity → child
-  // data items (same grouping the card view uses), computed once below.
+  }, [displaySubmissions, listSearch, listTypeFilter, listSaFilter]);
 
   const subjectAreaNames = useMemo(
     () => Array.from(new Set(requests.map(r => r.subjectAreaName))),
@@ -102,154 +130,102 @@ export function ApproverPortal({
     setModal({ type: 'entity', entity, subjectArea });
   const openDataItem = (dataItem: DataItem, entity: Entity, subjectArea: SubjectArea) =>
     setModal({ type: 'dataItem', dataItem, entity, subjectArea });
-  /** Hierarchy table's "unchanged entity" context row only has the Entity, not its SubjectArea — resolve it. */
+  /** The hierarchy table's "unchanged entity" context row only has the Entity, not its SubjectArea — resolve it. */
   const handleHierarchyEntityClick = (entity: Entity) => {
     const found = findEntityById(subjectAreas, entity.id);
     if (found) openEntity(found.entity, found.subjectArea);
   };
+  /** A row that IS a request (create/edit) opens the diff-highlighted detail modal. */
+  const openRequestDetail = (request: ChangeRequest) => setModal({ type: 'requestDetail', request });
 
-  // ── Hierarchy & Guards ────────────────────────────────────────
-
-  const isParentPendingNew = (req: ChangeRequest) => {
-    if (req.type !== 'create' || req.recordType !== 'dataitem') return false;
-    return requests.some(r =>
-      r.type === 'create' &&
-      r.recordType === 'entity' &&
-      r.status === 'pending' &&
-      r.proposedData.id === req.parentEntityId
-    );
+  // ── Cross-request dependency guard ──────────────────────────────
+  // A request can contain a data-item create whose parent entity is itself a
+  // pending create — but in a DIFFERENT request. That other request must be
+  // approved first (the entity has to exist before its column can attach).
+  const isBatchBlocked = (batchId: string) => {
+    const items = requests.filter(r => r.batchId === batchId);
+    return items.some(req => {
+      if (!(req.type === 'create' && req.recordType === 'dataitem')) return false;
+      return requests.some(r =>
+        r.batchId !== batchId &&
+        r.type === 'create' && r.recordType === 'entity' && r.status === 'pending' &&
+        r.proposedData.id === req.parentEntityId
+      );
+    });
   };
 
-  const getPendingChildrenCount = (entityId: string) => {
-    return requests.filter(r =>
-      r.status === 'pending' &&
-      r.type === 'create' &&
-      r.recordType === 'dataitem' &&
-      r.parentEntityId === entityId
-    ).length;
-  };
-
-  // Group by subject area → entity → nested data items (shared with the board's My Requests).
-  const subjectAreaGroups = useMemo(() => groupRequestsBySubjectArea(filteredDisplayRequests), [filteredDisplayRequests]);
-
-  // Flat, in-order list of pending request ids for Focus Mode (skips context headers)
-  const orderedPendingIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const sa of subjectAreaGroups) {
-      for (const block of sa.blocks) {
-        if (block.kind === 'entityRequest' && block.request.status === 'pending') ids.push(block.request.id);
-        for (const c of block.children) if (c.status === 'pending') ids.push(c.id);
-      }
-    }
-    return ids;
-  }, [subjectAreaGroups]);
+  // Flat, in-order list of pending batch ids for Focus Mode
+  const orderedPendingBatchIds = useMemo(() => pendingSubmissions.map(s => s.batchId), [pendingSubmissions]);
 
   // ── Selections (respect active filters) ───────────────────────
 
-  const allDisplayPendingIds = filteredDisplayRequests.filter(r => r.status === 'pending').map(r => r.id);
-  const allSelected = allDisplayPendingIds.length > 0 && allDisplayPendingIds.every(id => selectedIds.has(id));
+  const allDisplayPendingBatchIds = filteredSubmissions.filter(s => s.status === 'pending').map(s => s.batchId);
+  const allSelected = allDisplayPendingBatchIds.length > 0 && allDisplayPendingBatchIds.every(id => selectedBatchIds.has(id));
 
   const toggleSelectAll = () => {
-    if (allSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(allDisplayPendingIds));
+    if (allSelected) setSelectedBatchIds(new Set());
+    else setSelectedBatchIds(new Set(allDisplayPendingBatchIds));
   };
 
-  const toggleSelect = (id: string) => {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedIds(next);
+  const toggleSelect = (batchId: string) => {
+    const next = new Set(selectedBatchIds);
+    if (next.has(batchId)) next.delete(batchId);
+    else next.add(batchId);
+    setSelectedBatchIds(next);
   };
 
-  // Group-level "select all" (e.g. every data item under one unchanged
-  // entity, or every row in one table): if every id in the group is already
-  // selected, clear just those; otherwise add all of them to the selection.
-  const toggleSelectMany = (ids: string[]) => {
-    if (ids.length === 0) return;
-    const allSelected = ids.every(id => selectedIds.has(id));
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      ids.forEach(id => allSelected ? next.delete(id) : next.add(id));
-      return next;
-    });
+  // ── Approvals & Rejections (always whole-request) ──────────────
+
+  const handleApprove = (batchId: string) => {
+    onApprove(batchId);
+    setSelectedBatchIds(prev => { const n = new Set(prev); n.delete(batchId); return n; });
+    if (openBatchId === batchId) openSubmissionView(null);
   };
 
-  const toggleGroup = (name: string) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  // ── Approvals & Rejections ────────────────────────────────────
-
-  const handleSingleApprove = (id: string) => {
-    onApprove(id);
-    setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+  /** Approve from the open detail view: flush its drafts first (one commit point). */
+  const handleApproveOpen = (batchId: string) => {
+    flushOpenDrafts(batchId);
+    handleApprove(batchId);
   };
 
   const handleBulkApprove = () => {
-    const ids = Array.from(selectedIds);
-    const toApprove = ids.map(id => requests.find(r => r.id === id)).filter(Boolean) as ChangeRequest[];
-
-    // Approve entities before their data items so the guard passes.
-    toApprove.sort((a, b) => {
-      if (a.recordType === 'entity' && b.recordType !== 'entity') return -1;
-      if (b.recordType === 'entity' && a.recordType !== 'entity') return 1;
-      return 0;
-    });
-
-    for (const req of toApprove) {
-      if (isParentPendingNew(req)) {
-        const parentInBatch = toApprove.some(r => r.recordType === 'entity' && r.proposedData.id === req.parentEntityId);
-        if (!parentInBatch) {
-          toast.warning(`Skipped "${(req.proposedData as DataItem).name}" — approve its parent entity first.`);
-          continue;
-        }
-      }
-      onApprove(req.id);
+    const ids = Array.from(selectedBatchIds);
+    // Approve requests that don't depend on another pending request first.
+    const ordered = [...ids].sort((a, b) => (isBatchBlocked(a) ? 1 : 0) - (isBatchBlocked(b) ? 1 : 0));
+    for (const id of ordered) {
+      if (isBatchBlocked(id)) continue; // still blocked even after earlier approvals in this batch
+      onApprove(id);
     }
-
-    setSelectedIds(new Set());
+    setSelectedBatchIds(new Set());
   };
 
-  const handleOpenRejectDialog = (ids: string[]) => setRejectingIds(ids);
+  const handleOpenRejectDialog = (batchIds: string[]) => setRejectingBatchIds(batchIds);
+
+  /** Reject from the open detail view: flush its drafts first (one commit point), then open the dialog. */
+  const handleRejectOpen = (batchId: string) => {
+    flushOpenDrafts(batchId);
+    handleOpenRejectDialog([batchId]);
+  };
 
   const confirmReject = (reason: string) => {
-    if (!rejectingIds) return;
-    rejectingIds.forEach(id => onReject(id, reason));
-    setRejectingIds(null);
-    setSelectedIds(new Set());
-  };
-
-  const getCascadeWarning = () => {
-    if (!rejectingIds) return null;
-    const reqs = rejectingIds.map(id => requests.find(r => r.id === id)).filter(Boolean) as ChangeRequest[];
-    const entityReqs = reqs.filter(r => r.type === 'create' && r.recordType === 'entity');
-
-    let totalChildren = 0;
-    let entityName = '';
-    for (const er of entityReqs) {
-      const childrenCount = getPendingChildrenCount(er.proposedData.id);
-      if (childrenCount > 0) { totalChildren += childrenCount; entityName = (er.proposedData as Entity).name; }
-    }
-
-    if (totalChildren > 0) {
-      const nameStr = entityReqs.length === 1 ? `'${entityName}'` : 'these entities';
-      return `Rejecting ${nameStr} will also reject ${totalChildren} pending child data-item request(s) so no orphans are left.`;
-    }
-    return null;
+    if (!rejectingBatchIds) return;
+    rejectingBatchIds.forEach(id => onReject(id, reason));
+    setRejectingBatchIds(null);
+    setSelectedBatchIds(new Set());
+    if (rejectingBatchIds.includes(openBatchId ?? '')) openSubmissionView(null);
   };
 
   // ── Focus mode ────────────────────────────────────────────────
 
   const enterFocusMode = () => {
-    if (orderedPendingIds.length === 0) return;
-    setFocusQueueIds(orderedPendingIds);
+    if (orderedPendingBatchIds.length === 0) return;
+    setFocusQueueIds(orderedPendingBatchIds);
     setFocusMode(true);
   };
+
+  const openSubmission: Submission | undefined = openBatchId
+    ? allSubmissions.find(s => s.batchId === openBatchId)
+    : undefined;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col relative pb-20">
@@ -281,16 +257,16 @@ export function ApproverPortal({
                 Catalog
               </button>
               <button
-                onClick={() => setTab('requests')}
+                onClick={() => { setTab('requests'); openSubmissionView(null); setFocusMode(false); }}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors relative ${
                   tab === 'requests' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
                 <Bell className="w-3.5 h-3.5" />
                 Requests
-                {pending.length > 0 && (
+                {pendingSubmissions.length > 0 && (
                   <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                    {pending.length}
+                    {pendingSubmissions.length}
                   </span>
                 )}
               </button>
@@ -377,32 +353,58 @@ export function ApproverPortal({
 
         {tab === 'requests' && (
           <div className="flex flex-col gap-5 pb-12">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900">Change Requests</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Review, approve, or reject pending change requests from board members
-                </p>
+            {!openBatchId && !focusMode && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">Change Requests</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Each request bundles every entity/data-item change submitted together — accept or reject the whole thing
+                  </p>
+                </div>
+                <div className="flex items-center gap-4 text-sm text-gray-500">
+                  <span><span className="font-semibold text-amber-600">{pendingSubmissions.length}</span> pending</span>
+                  <span><span className="font-semibold text-emerald-600">{approvedSubmissions.length}</span> approved</span>
+                  <span><span className="font-semibold text-red-600">{rejectedSubmissions.length}</span> rejected</span>
+                </div>
               </div>
-              <div className="flex items-center gap-4 text-sm text-gray-500">
-                <span><span className="font-semibold text-amber-600">{pending.length}</span> pending</span>
-                <span><span className="font-semibold text-emerald-600">{approved.length}</span> approved</span>
-                <span><span className="font-semibold text-red-600">{rejected.length}</span> rejected</span>
-              </div>
-            </div>
+            )}
 
             {focusMode ? (
               <FocusModeView
                 queueIds={focusQueueIds}
                 requests={requests}
-                onApprove={onApprove}
+                subjectAreas={subjectAreas}
+                onApprove={handleApprove}
                 onReject={onReject}
                 onExit={() => setFocusMode(false)}
-                isParentPendingNew={isParentPendingNew}
+                onEntityClick={handleHierarchyEntityClick}
+                onRowClick={openRequestDetail}
+                itemComments={itemComments}
+                onAddItemComment={onAddItemComment}
+                batchComments={batchComments}
+                onAddBatchComment={onAddBatchComment}
+                isBatchBlocked={isBatchBlocked}
+              />
+            ) : openSubmission ? (
+              <SubmissionDetailView
+                submission={openSubmission}
+                subjectAreas={subjectAreas}
+                onBack={() => openSubmissionView(null)}
+                onApprove={() => handleApproveOpen(openSubmission.batchId)}
+                onReject={() => handleRejectOpen(openSubmission.batchId)}
+                onEntityClick={handleHierarchyEntityClick}
+                onRowClick={openRequestDetail}
+                itemComments={itemComments}
+                genericComments={batchComments[openSubmission.batchId] ?? []}
+                itemDrafts={openItemDrafts}
+                onItemDraftChange={(requestId, text) => setOpenItemDrafts(prev => ({ ...prev, [requestId]: text }))}
+                genericDraft={openGenericDraft}
+                onGenericDraftChange={setOpenGenericDraft}
+                blocked={isBatchBlocked(openSubmission.batchId)}
               />
             ) : (
               <>
-                {/* Filter pills + view toggle + Review button */}
+                {/* Filter pills + Review button */}
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-2">
                     {(['pending', 'approved', 'rejected'] as const).map(f => (
@@ -416,44 +418,22 @@ export function ApproverPortal({
                         }`}
                       >
                         {f}
-                        {f === 'pending' && pending.length > 0 && (
+                        {f === 'pending' && pendingSubmissions.length > 0 && (
                           <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
-                            {pending.length}
+                            {pendingSubmissions.length}
                           </span>
                         )}
                       </button>
                     ))}
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    {/* Card / Table — table is the Excel-style scalable default */}
-                    <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                      <button
-                        onClick={() => setReqViewMode('card')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                          reqViewMode === 'card' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                        }`}
-                      >
-                        <Rows3 className="w-3.5 h-3.5" /> Card
-                      </button>
-                      <button
-                        onClick={() => setReqViewMode('table')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                          reqViewMode === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                        }`}
-                      >
-                        <Table2 className="w-3.5 h-3.5" /> Table
-                      </button>
-                    </div>
-
-                    <button
-                      onClick={enterFocusMode}
-                      disabled={allDisplayPendingIds.length === 0}
-                      className="inline-flex items-center justify-center gap-2 h-9 px-4 bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-                    >
-                      <Play className="w-4 h-4" /> Review Pending
-                    </button>
-                  </div>
+                  <button
+                    onClick={enterFocusMode}
+                    disabled={orderedPendingBatchIds.length === 0}
+                    className="inline-flex items-center justify-center gap-2 h-9 px-4 bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+                  >
+                    <Play className="w-4 h-4" /> Review Pending
+                  </button>
                 </div>
 
                 {/* Search + type + subject-area filters + select all */}
@@ -463,7 +443,7 @@ export function ApproverPortal({
                     <input
                       value={listSearch}
                       onChange={e => setListSearch(e.target.value)}
-                      placeholder="Search requests by record name…"
+                      placeholder="Search requests by requester or record name…"
                       className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-400"
                     />
                   </div>
@@ -485,7 +465,7 @@ export function ApproverPortal({
                     {subjectAreaNames.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
 
-                  {allDisplayPendingIds.length > 0 && (
+                  {allDisplayPendingBatchIds.length > 0 && (
                     <div className="flex items-center gap-2 ml-auto">
                       <CheckboxPrimitive.Root
                         id="select-all-pending"
@@ -498,13 +478,13 @@ export function ApproverPortal({
                         </CheckboxPrimitive.Indicator>
                       </CheckboxPrimitive.Root>
                       <label htmlFor="select-all-pending" className="text-sm font-medium text-gray-700 cursor-pointer whitespace-nowrap">
-                        Select all {allDisplayPendingIds.length} pending
+                        Select all {allDisplayPendingBatchIds.length} pending
                       </label>
                     </div>
                   )}
                 </div>
 
-                {filteredDisplayRequests.length === 0 && (
+                {filteredSubmissions.length === 0 && (
                   <div className="text-center py-20 text-gray-400">
                     <Bell className="w-10 h-10 mx-auto mb-3 text-gray-200" />
                     <div className="text-sm font-medium">No matching requests</div>
@@ -516,35 +496,18 @@ export function ApproverPortal({
                   </div>
                 )}
 
-                {filteredDisplayRequests.length > 0 && reqViewMode === 'table' && (
-                  <HierarchyRequestTable
-                    groups={subjectAreaGroups}
-                    subjectAreas={subjectAreas}
-                    selectedIds={selectedIds}
-                    onToggleSelect={toggleSelect}
-                    onSelectMany={toggleSelectMany}
-                    onApprove={handleSingleApprove}
-                    onReject={(id) => handleOpenRejectDialog([id])}
-                    onRowClick={(req) => setModal({ type: 'requestDetail', request: req })}
-                    onEntityClick={handleHierarchyEntityClick}
-                    isParentPendingNew={isParentPendingNew}
-                  />
-                )}
-
-                {filteredDisplayRequests.length > 0 && reqViewMode === 'card' && (
-                  <RequestGroupList
-                    groups={subjectAreaGroups}
-                    subjectAreas={subjectAreas}
-                    collapsedGroups={collapsedGroups}
-                    onToggleGroup={toggleGroup}
-                    selectedIds={selectedIds}
-                    onToggleSelect={toggleSelect}
-                    onSelectMany={toggleSelectMany}
-                    isParentPendingNew={isParentPendingNew}
-                    onApprove={handleSingleApprove}
-                    onReject={(id) => handleOpenRejectDialog([id])}
-                  />
-                )}
+                {/* One RequestCard per request (= per batch) — click to open the full table */}
+                <div className="flex flex-col gap-2.5">
+                  {filteredSubmissions.map(submission => (
+                    <SubmissionCard
+                      key={submission.batchId}
+                      submission={submission}
+                      onOpen={() => openSubmissionView(submission.batchId)}
+                      selected={selectedBatchIds.has(submission.batchId)}
+                      onToggleSelect={() => toggleSelect(submission.batchId)}
+                    />
+                  ))}
+                </div>
               </>
             )}
           </div>
@@ -552,20 +515,20 @@ export function ApproverPortal({
       </main>
 
       {/* Sticky Bottom Action Bar */}
-      {selectedIds.size > 0 && tab === 'requests' && !focusMode && (
+      {selectedBatchIds.size > 0 && tab === 'requests' && !focusMode && !openBatchId && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-50 animate-in slide-in-from-bottom-2">
           <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between">
             <div className="text-sm font-semibold text-gray-700">
-              {selectedIds.size} selected request(s)
+              {selectedBatchIds.size} selected request(s)
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setSelectedIds(new Set())}
+                onClick={() => setSelectedBatchIds(new Set())}
                 className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
               >
                 Clear
               </button>
-              <RejectButton size="md" variant="solid" onClick={() => handleOpenRejectDialog(Array.from(selectedIds))}>
+              <RejectButton size="md" variant="solid" onClick={() => handleOpenRejectDialog(Array.from(selectedBatchIds))}>
                 Reject Selected
               </RejectButton>
               <ApproveButton size="md" onClick={handleBulkApprove}>
@@ -578,10 +541,9 @@ export function ApproverPortal({
 
       {/* Reject Dialog */}
       <RejectDialog
-        open={rejectingIds !== null}
-        count={rejectingIds?.length ?? 1}
-        cascadeWarning={getCascadeWarning()}
-        onClose={() => setRejectingIds(null)}
+        open={rejectingBatchIds !== null}
+        count={rejectingBatchIds?.length ?? 1}
+        onClose={() => setRejectingBatchIds(null)}
         onConfirm={confirmReject}
       />
 

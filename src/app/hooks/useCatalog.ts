@@ -1,21 +1,52 @@
 // The catalog + change-request "engine": owns the in-memory state and every
 // mutation (board submissions, approver approve/reject, and undo). Extracted
 // from App.tsx so the App component is just routing + composition (SRP).
+//
+// Approval granularity: approvers act on a whole REQUEST (= every entity and
+// data-item change sharing one `batchId`) at once. There is no per-entity /
+// per-data-item approve or reject — see lib/submissions.ts for how requests
+// are grouped, and ApproverPortal/SubmissionDetailView for the review UI.
 
-import { useState } from 'react';
+import { useState, Dispatch, SetStateAction } from 'react';
 import { toast } from 'sonner';
-import { SubjectArea, Entity, DataItem, ChangeRequest } from '../types';
+import { SubjectArea, Entity, DataItem, ChangeRequest, Comment, RecordAttributes } from '../types';
 import { mockSubjectAreas } from '../data/mockData';
 import { initialRequests } from '../data/initialRequests';
 import { computeChangedFields, findEntityById, findDataItemById } from '../lib/catalog';
-import { CURRENT_BOARD_MEMBER } from '../lib/constants';
+import { CURRENT_BOARD_MEMBER, CURRENT_APPROVER } from '../lib/constants';
 
 let reqCounter = 100;
 const nextReqId = () => `req-${++reqCounter}`;
+let batchCounter = 100;
+const nextBatchId = () => `batch-${++batchCounter}`;
+let commentCounter = 100;
+const nextCommentId = () => `cmt-${++commentCounter}`;
 
 export function useCatalog() {
   const [subjectAreas, setSubjectAreas] = useState<SubjectArea[]>(mockSubjectAreas);
   const [requests, setRequests] = useState<ChangeRequest[]>(initialRequests);
+
+  // Review comment THREADS — accumulate across reject → revise → resubmit
+  // rounds rather than overwrite, so both sides can see the full history.
+  // Never affect the catalog data itself. Per data-item/entity thread, keyed
+  // by the individual ChangeRequest id:
+  const [itemComments, setItemComments] = useState<Record<string, Comment[]>>({});
+  // One generic thread for the whole request, keyed by batchId:
+  const [batchComments, setBatchComments] = useState<Record<string, Comment[]>>({});
+
+  const appendComment = (
+    setter: Dispatch<SetStateAction<Record<string, Comment[]>>>,
+    key: string,
+    text: string,
+    author: string = CURRENT_APPROVER,
+  ) => {
+    if (!text.trim()) return;
+    const entry: Comment = { id: nextCommentId(), author, text: text.trim(), timestamp: new Date().toISOString() };
+    setter(prev => ({ ...prev, [key]: [...(prev[key] ?? []), entry] }));
+  };
+
+  const addItemComment = (requestId: string, text: string) => appendComment(setItemComments, requestId, text);
+  const addBatchComment = (batchId: string, text: string) => appendComment(setBatchComments, batchId, text);
 
   // ── Committed data mutations (applied on approval) ──────────────
   const commitAddEntity = (subjectAreaId: string, entity: Entity) =>
@@ -49,10 +80,13 @@ export function useCatalog() {
     })));
 
   // ── Board member submissions (queue a request, never write directly) ──
-  const queueRequest = (req: Omit<ChangeRequest, 'id' | 'status' | 'submittedAt' | 'submittedBy'>) =>
+  // Each call here is its own one-item request/batch (one entity or one data
+  // item submitted on its own).
+  const queueRequest = (req: Omit<ChangeRequest, 'id' | 'batchId' | 'status' | 'submittedAt' | 'submittedBy'>) =>
     setRequests(prev => [...prev, {
       ...req,
       id: nextReqId(),
+      batchId: nextBatchId(),
       status: 'pending',
       submittedAt: new Date().toISOString(),
       submittedBy: CURRENT_BOARD_MEMBER,
@@ -120,8 +154,25 @@ export function useCatalog() {
     toast.success('Edit request submitted for approval');
   };
 
-  // ── Approver actions ────────────────────────────────────────────
-  const undoApprove = (req: ChangeRequest) => {
+  // ── Approver actions — whole request (batch) at a time ──────────
+
+  const commitOne = (req: ChangeRequest) => {
+    if (req.type === 'create' && req.recordType === 'entity') {
+      commitAddEntity(req.subjectAreaId, req.proposedData as Entity);
+    } else if (req.type === 'create' && req.recordType === 'dataitem') {
+      commitAddDataItem(req.parentEntityId!, req.proposedData as DataItem);
+    } else if (req.type === 'edit' && req.recordType === 'entity') {
+      // Preserve existing dataItems — proposedData carries an empty dataItems array.
+      const { dataItems, id, ...rest } = req.proposedData as Entity;
+      void dataItems;
+      commitUpdateEntity(id, rest);
+    } else if (req.type === 'edit' && req.recordType === 'dataitem') {
+      const proposed = req.proposedData as DataItem;
+      commitUpdateDataItem(proposed.id, proposed);
+    }
+  };
+
+  const uncommitOne = (req: ChangeRequest) => {
     if (req.type === 'create' && req.recordType === 'entity') {
       setSubjectAreas(prev => prev.map(sa =>
         sa.id === req.subjectAreaId
@@ -139,7 +190,6 @@ export function useCatalog() {
       })));
     } else if (req.type === 'edit' && req.originalData) {
       if (req.recordType === 'entity') {
-        // Restore prior metadata WITHOUT clobbering the entity's real dataItems.
         const { dataItems, id, ...rest } = req.originalData as Entity;
         void dataItems;
         commitUpdateEntity(id, rest);
@@ -148,61 +198,93 @@ export function useCatalog() {
         commitUpdateDataItem(id, rest);
       }
     }
-    setRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'pending' as const, rejectionReason: undefined } : r));
   };
 
-  const approve = (requestId: string) => {
-    const req = requests.find(r => r.id === requestId);
-    if (!req) return;
+  const undoApproveBatch = (items: ChangeRequest[]) => {
+    items.forEach(uncommitOne);
+    const ids = items.map(i => i.id);
+    setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'pending' as const, rejectionReason: undefined, reviewedBy: undefined, reviewedAt: undefined } : r));
+  };
 
-    if (req.type === 'create' && req.recordType === 'entity') {
-      commitAddEntity(req.subjectAreaId, req.proposedData as Entity);
-    } else if (req.type === 'create' && req.recordType === 'dataitem') {
-      commitAddDataItem(req.parentEntityId!, req.proposedData as DataItem);
-    } else if (req.type === 'edit' && req.recordType === 'entity') {
-      // Preserve existing dataItems — proposedData carries an empty dataItems array.
-      const { dataItems, id, ...rest } = req.proposedData as Entity;
-      void dataItems;
-      commitUpdateEntity(id, rest);
-    } else if (req.type === 'edit' && req.recordType === 'dataitem') {
-      const proposed = req.proposedData as DataItem;
-      commitUpdateDataItem(proposed.id, proposed);
-    }
+  /** Approve every pending item in this request (batchId) — there is no partial approval. */
+  const approve = (batchId: string) => {
+    const items = requests.filter(r => r.batchId === batchId && r.status === 'pending');
+    if (items.length === 0) return;
 
-    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'approved' as const } : r));
+    // Entities before their data items, so a new entity exists before its
+    // new columns try to attach to it.
+    const ordered = [...items].sort((a, b) => {
+      if (a.recordType === 'entity' && b.recordType !== 'entity') return -1;
+      if (b.recordType === 'entity' && a.recordType !== 'entity') return 1;
+      return 0;
+    });
+    ordered.forEach(commitOne);
 
-    const name = (req.proposedData as Entity | DataItem).name;
-    toast.success(`Approved "${name}"`, {
-      action: { label: 'Undo', onClick: () => undoApprove(req) },
+    const ids = items.map(i => i.id);
+    const reviewedAt = new Date().toISOString();
+    setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'approved' as const, reviewedBy: CURRENT_APPROVER, reviewedAt } : r));
+
+    toast.success(`Approved request (${items.length} item${items.length !== 1 ? 's' : ''})`, {
+      action: { label: 'Undo', onClick: () => undoApproveBatch(items) },
     });
   };
 
-  const undoReject = (ids: string[]) =>
-    setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'pending' as const, rejectionReason: undefined } : r));
+  const undoRejectBatch = (ids: string[]) =>
+    setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'pending' as const, rejectionReason: undefined, reviewedBy: undefined, reviewedAt: undefined } : r));
 
-  const reject = (requestId: string, reason: string) => {
-    const targetReq = requests.find(r => r.id === requestId);
-    if (!targetReq) return;
+  /** Reject every pending item in this request (batchId) — there is no partial rejection. The
+   * reason is stored on the request itself (rejectionReason, shown as its own banner in the UI)
+   * and is NOT appended to the generic comment thread — that thread only ever shows comments
+   * someone explicitly typed into it (across every reject → revise → resubmit round), not a
+   * duplicate of the rejection-reason banner. */
+  const reject = (batchId: string, reason: string) => {
+    const ids = requests.filter(r => r.batchId === batchId && r.status === 'pending').map(r => r.id);
+    if (ids.length === 0) return;
 
-    // Cascade: rejecting a new entity also rejects its pending child data-item requests (no orphans).
-    const childIds = (targetReq.type === 'create' && targetReq.recordType === 'entity')
-      ? requests
-          .filter(r => r.status === 'pending' && r.type === 'create' && r.recordType === 'dataitem' && r.parentEntityId === targetReq.proposedData.id)
-          .map(r => r.id)
-      : [];
-    const affectedIds = [requestId, ...childIds];
+    const reviewedAt = new Date().toISOString();
+    setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'rejected' as const, rejectionReason: reason, reviewedBy: CURRENT_APPROVER, reviewedAt } : r));
 
+    toast.error(`Rejected request (${ids.length} item${ids.length !== 1 ? 's' : ''})`, {
+      action: { label: 'Undo', onClick: () => undoRejectBatch(ids) },
+    });
+  };
+
+  /**
+   * Board member revises a REJECTED request and resubmits it — same batchId/request ids (so the
+   * itemComments/batchComments threads carry straight over, per the reject → revise → resubmit
+   * model), just with updated proposedData and status flipped back to 'pending'. Validation (are
+   * the required fields filled in) happens in the UI before this is ever called — this function
+   * just commits whatever draft values it's given.
+   */
+  const reviseAndResubmit = (batchId: string, drafts: Record<string, Partial<RecordAttributes>>) => {
+    const items = requests.filter(r => r.batchId === batchId);
+    if (items.length === 0) return;
+
+    const resubmittedAt = new Date().toISOString();
     setRequests(prev => prev.map(r => {
-      if (r.id === requestId) return { ...r, status: 'rejected' as const, rejectionReason: reason };
-      if (childIds.includes(r.id)) return { ...r, status: 'rejected' as const, rejectionReason: `Auto-rejected because parent entity was rejected: ${reason}` };
-      return r;
+      if (r.batchId !== batchId) return r;
+      const draft = drafts[r.id];
+      if (!draft) return r;
+      const proposedData = { ...r.proposedData, ...draft } as Entity | DataItem;
+      const changedFields = r.type === 'edit' && r.originalData
+        ? computeChangedFields(
+            r.originalData as unknown as Record<string, unknown>,
+            proposedData as unknown as Record<string, unknown>,
+          )
+        : r.changedFields;
+      return {
+        ...r,
+        proposedData,
+        changedFields,
+        status: 'pending' as const,
+        rejectionReason: undefined,
+        reviewedBy: undefined,
+        reviewedAt: undefined,
+        submittedAt: resubmittedAt,
+      };
     }));
 
-    const name = (targetReq.proposedData as Entity | DataItem).name;
-    const extra = childIds.length > 0 ? ` (+${childIds.length} child item${childIds.length !== 1 ? 's' : ''})` : '';
-    toast.error(`Rejected "${name}"${extra}`, {
-      action: { label: 'Undo', onClick: () => undoReject(affectedIds) },
-    });
+    toast.success('Request updated and resubmitted for approval');
   };
 
   return {
@@ -214,5 +296,10 @@ export function useCatalog() {
     submitEditDataItem,
     approve,
     reject,
+    reviseAndResubmit,
+    itemComments,
+    addItemComment,
+    batchComments,
+    addBatchComment,
   };
 }
