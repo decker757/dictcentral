@@ -17,6 +17,7 @@ import { ChangeRequest, Entity, RecordAttributes, SubjectArea, Comment } from '.
 import { SubjectAreaGroup, EntityBlock } from '../../lib/requestGroups';
 import { RECORD_FIELDS, REQUIRED_RECORD_FIELDS, FieldKind, fieldInputValue, parseFieldInput } from '../../lib/fieldSchema';
 import { formatValue } from '../../lib/format';
+import { findEntityById } from '../../lib/catalog';
 import { RecordTypeIcon } from '../../lib/badges';
 import { CommentThread } from './CommentThread';
 
@@ -116,12 +117,7 @@ function EditableEntityGroupTable({
     // the rejected request — only some of its data items were) — resolve
     // the real entity purely for display, same as the read-only table does.
     const parentId = block.children[0]?.parentEntityId;
-    if (parentId) {
-      for (const sa of subjectAreas) {
-        const e = sa.entities.find(e => e.id === parentId);
-        if (e) { contextEntity = e; break; }
-      }
-    }
+    contextEntity = parentId ? findEntityById(subjectAreas, parentId)?.entity : undefined;
   }
 
   const isParentRequest = !!parentRequest;

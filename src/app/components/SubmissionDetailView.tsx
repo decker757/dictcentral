@@ -16,21 +16,15 @@
 // no Approve/Reject (so no drafts either), the threads — including the
 // generic one — are shown exactly as the approver left them.
 
-import { ChevronLeft, Clock, Lock, Download, Pencil } from 'lucide-react';
+import { ChevronLeft, Clock, Lock, Download, Pencil, Undo2 } from 'lucide-react';
 import { ChangeRequest, Comment, Entity, SubjectArea } from '../types';
 import { Submission } from '../lib/submissions';
 import { groupRequestsBySubjectArea } from '../lib/requestGroups';
 import { HierarchyRequestTable } from './shared/HierarchyRequestTable';
 import { CommentThread } from './shared/CommentThread';
 import { formatSubmittedAt } from '../lib/format';
-import { OperationBadge } from '../lib/badges';
+import { OperationBadge, SubmissionStatusBadge } from '../lib/badges';
 import { ApproveButton, RejectButton } from './ui/ActionButton';
-
-const STATUS_BADGE: Record<Submission['status'], string> = {
-  pending: 'bg-amber-50 text-amber-700 border-amber-200',
-  approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  rejected: 'bg-red-50 text-red-600 border-red-200',
-};
 
 interface SubmissionDetailViewProps {
   submission: Submission;
@@ -56,12 +50,14 @@ interface SubmissionDetailViewProps {
   onExport?: () => void;
   /** Board member view, rejected request only: switches to the Revise & Resubmit screen. */
   onEdit?: () => void;
+  /** Board member view, pending request only: opens the withdraw confirmation. */
+  onWithdraw?: () => void;
 }
 
 export function SubmissionDetailView({
   submission, subjectAreas, onBack, onApprove, onReject, onEntityClick, onRowClick,
   itemComments, genericComments, itemDrafts, onItemDraftChange, genericDraft, onGenericDraftChange,
-  blocked, blockedReason, readOnly, onExport, onEdit,
+  blocked, blockedReason, readOnly, onExport, onEdit, onWithdraw,
 }: SubmissionDetailViewProps) {
   const groups = groupRequestsBySubjectArea(submission.items);
   const isPending = submission.status === 'pending';
@@ -85,9 +81,7 @@ export function SubmissionDetailView({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-lg font-bold text-gray-900">{submission.submittedBy}</span>
               {submission.operations.map(op => <OperationBadge key={op} operation={op} />)}
-              <span className={`px-2 py-0.5 rounded-md text-xs font-medium border capitalize ${STATUS_BADGE[submission.status]}`}>
-                {submission.status}
-              </span>
+              <SubmissionStatusBadge status={submission.status} size="md" />
             </div>
             <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-1.5 flex-wrap">
               <Clock className="w-3 h-3" />
@@ -119,8 +113,16 @@ export function SubmissionDetailView({
             </div>
           )}
 
-          {readOnly && (onExport || onEdit) && (
+          {readOnly && (onExport || onEdit || onWithdraw) && (
             <div className="flex items-center gap-2 flex-shrink-0">
+              {onWithdraw && (
+                <button
+                  onClick={onWithdraw}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-white text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 border border-red-200 transition-colors shadow-sm"
+                >
+                  <Undo2 className="w-4 h-4" /> Withdraw
+                </button>
+              )}
               {onEdit && (
                 <button
                   onClick={onEdit}
@@ -162,7 +164,7 @@ export function SubmissionDetailView({
             per-row threads. */}
         <div className="px-6 py-4 bg-gray-50/60 border-b border-gray-100">
           <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-            Comments on this request
+            Comments on this submission
           </label>
           <CommentThread
             comments={genericComments}

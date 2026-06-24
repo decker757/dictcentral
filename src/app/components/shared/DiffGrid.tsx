@@ -1,9 +1,11 @@
-// The change-request diff view, shared by RequestCard and FocusModeView.
-// Both previously computed `visibleFields` / `newFieldCount` / `changedSet`
-// and re-implemented the field grid + legend independently.
+// The change-request diff view, shared by SubmissionDetailView (via
+// HierarchyRequestTable's getRequestDiff usage) and RequestDetailModal, plus
+// FocusModeView indirectly (it wraps SubmissionDetailView). All of them
+// compute `visibleFields` / `changedSet` and render the field grid + legend
+// from this one shared place rather than re-implementing it per view.
 
 import { ChangeRequest } from '../../types';
-import { ENTITY_FIELDS, DATAITEM_FIELDS, FieldDef } from '../../lib/fieldSchema';
+import { RECORD_FIELDS, FieldDef } from '../../lib/fieldSchema';
 import { formatValue, isEmptyValue } from '../../lib/format';
 
 interface FieldRowProps {
@@ -53,7 +55,9 @@ export interface RequestDiff {
 export function getRequestDiff(request: ChangeRequest): RequestDiff {
   const isCreate = request.type === 'create';
   const isEntity = request.recordType === 'entity';
-  const fields = (isEntity ? ENTITY_FIELDS : DATAITEM_FIELDS) as unknown as FieldDef<Record<string, unknown>>[];
+  // Entities and data items share one flat attribute schema (RecordAttributes — see
+  // types.ts/fieldSchema.ts), so there's no actual per-record-type field list to pick between.
+  const fields = RECORD_FIELDS as unknown as FieldDef<Record<string, unknown>>[];
   const proposed = request.proposedData as unknown as Record<string, unknown>;
   const original = request.originalData as unknown as Record<string, unknown> | undefined;
   const changedSet = new Set(request.changedFields ?? []);

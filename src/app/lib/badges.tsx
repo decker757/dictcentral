@@ -6,6 +6,7 @@
 // content scanner keeps them in the build.
 
 import { Shield, Lock, Key, Layers, Database, FileText, Plus, Pencil, Trash2, type LucideIcon } from 'lucide-react';
+import type { RequestStatus } from '../types';
 
 type Tone = 'solid' | 'subtle';
 
@@ -176,6 +177,41 @@ export function OperationBadge({ operation, className = '' }: { operation: Opera
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cls} ${className}`}>
       <Icon className="w-3 h-3" strokeWidth={2.5} />{label}
+    </span>
+  );
+}
+
+// ── Submission status (pending / approved / rejected) ──
+//
+// The pill shown on SubmissionCard, BoardRequestCard, SubmissionDetailView's
+// header, and RequestDetailModal — previously a `Record<status, classes>`
+// literal copy-pasted in all four (two slightly different shades: a `-50`
+// "subtle" tone for the list/detail views, a `-100` "solid" tone for the
+// modal); centralized here with the same `tone` convention as
+// ClassificationBadge instead of drifting between copies.
+
+const SUBMISSION_STATUS_BADGE: Record<RequestStatus, Record<Tone, string>> = {
+  pending:  { subtle: 'bg-amber-50 text-amber-700 border-amber-200',       solid: 'bg-amber-100 text-amber-700 border-amber-200' },
+  approved: { subtle: 'bg-emerald-50 text-emerald-700 border-emerald-200', solid: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  rejected: { subtle: 'bg-red-50 text-red-600 border-red-200',            solid: 'bg-red-100 text-red-600 border-red-200' },
+};
+
+export const submissionStatusBadgeClass = (status: RequestStatus, tone: Tone = 'subtle'): string =>
+  SUBMISSION_STATUS_BADGE[status][tone];
+
+export function SubmissionStatusBadge({
+  status, size = 'sm', tone = 'subtle', className = '',
+}: {
+  status: RequestStatus;
+  /** `sm` (list cards) vs `md` (SubmissionDetailView's larger header). */
+  size?: 'sm' | 'md';
+  tone?: Tone;
+  className?: string;
+}) {
+  const textSize = size === 'sm' ? 'text-[11px]' : 'text-xs';
+  return (
+    <span className={`px-2 py-0.5 rounded-md ${textSize} font-medium border capitalize ${submissionStatusBadgeClass(status, tone)} ${className}`}>
+      {status}
     </span>
   );
 }

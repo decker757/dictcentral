@@ -1,10 +1,11 @@
 // The canonical field list shared by Entities and Data Items — both record
 // types are populated from the same import template, so they share one flat
 // attribute schema. This is the single source of truth consumed by the diff
-// views (RequestCard, FocusModeView via DiffGrid), the Excel-style
-// RequestTable, and the read-only EntityViewCard.
+// views (DiffGrid, used by SubmissionDetailView/RequestDetailModal/FocusModeView),
+// the Excel-style HierarchyRequestTable/EditableHierarchyRequestTable, and
+// every entity/data-item modal and form.
 
-import { Entity, DataItem, RecordAttributes } from '../types';
+import { RecordAttributes } from '../types';
 import { DATA_TYPES, CLASSIFICATIONS, SENSITIVITY_LEVELS, ENTITY_STATUSES, KEY_INDICATORS } from './constants';
 
 export type FieldKind = 'text' | 'textarea' | 'select' | 'boolean' | 'number' | 'list';
@@ -51,11 +52,6 @@ export const RECORD_FIELDS: FieldDef<RecordAttributes>[] = [
   { key: 'lastUpdated', label: 'Last Updated', kind: 'text' },
   { key: 'tags', label: 'Tags', kind: 'list' },
 ];
-
-// Kept as two names for backward compatibility with call sites that branch
-// on record type — both now point at the exact same shared field list.
-export const ENTITY_FIELDS = RECORD_FIELDS as unknown as FieldDef<Entity>[];
-export const DATAITEM_FIELDS = RECORD_FIELDS as unknown as FieldDef<DataItem>[];
 
 /** Fields that must be non-empty on every row before a create/edit (or a revised, resubmitted)
  * request can go through — mirrors the non-optional keys on RecordAttributes (see types.ts). */

@@ -21,6 +21,7 @@ import { ChangeRequest, Entity, DataItem, SubjectArea, Comment } from '../../typ
 import { SubjectAreaGroup, EntityBlock } from '../../lib/requestGroups';
 import { RECORD_FIELDS } from '../../lib/fieldSchema';
 import { formatValue, isEmptyValue } from '../../lib/format';
+import { findEntityById } from '../../lib/catalog';
 import { getRequestDiff } from './DiffGrid';
 import { RecordTypeIcon } from '../../lib/badges';
 import { CommentThread } from './CommentThread';
@@ -137,14 +138,8 @@ function EntityGroupTable({
   if (block.kind === 'entityRequest') {
     parentRow = rowFromRequest(block.request);
   } else {
-    let entity: Entity | undefined;
     const parentId = block.children[0]?.parentEntityId;
-    if (parentId) {
-      for (const sa of subjectAreas) {
-        const e = sa.entities.find(e => e.id === parentId);
-        if (e) { entity = e; break; }
-      }
-    }
+    const entity = parentId ? findEntityById(subjectAreas, parentId)?.entity : undefined;
     parentRow = entity ? rowFromEntity(entity) : rowFromName(block.entityName);
   }
 

@@ -69,7 +69,3 @@ export function groupRequestsByBatch(requests: ChangeRequest[]): Submission[] {
 
   return submissions.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
 }
-
-export function findSubmission(requests: ChangeRequest[], batchId: string): Submission | undefined {
-  return groupRequestsByBatch(requests.filter(r => r.batchId === batchId))[0];
-}

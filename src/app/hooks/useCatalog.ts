@@ -1,6 +1,6 @@
 // The catalog + change-request "engine": owns the in-memory state and every
-// mutation (board submissions, approver approve/reject, and undo). Extracted
-// from App.tsx so the App component is just routing + composition (SRP).
+// mutation (board submissions, approver approve/reject). Extracted from
+// App.tsx so the App component is just routing + composition (SRP).
 //
 // Approval granularity: approvers act on a whole REQUEST (= every entity and
 // data-item change sharing one `batchId`) at once. There is no per-entity /
@@ -172,40 +172,6 @@ export function useCatalog() {
     }
   };
 
-  const uncommitOne = (req: ChangeRequest) => {
-    if (req.type === 'create' && req.recordType === 'entity') {
-      setSubjectAreas(prev => prev.map(sa =>
-        sa.id === req.subjectAreaId
-          ? { ...sa, entities: sa.entities.filter(e => e.id !== req.proposedData.id), entityCount: Math.max(0, sa.entityCount - 1) }
-          : sa
-      ));
-    } else if (req.type === 'create' && req.recordType === 'dataitem') {
-      setSubjectAreas(prev => prev.map(sa => ({
-        ...sa,
-        entities: sa.entities.map(e =>
-          e.id === req.parentEntityId
-            ? { ...e, dataItems: e.dataItems.filter(di => di.id !== req.proposedData.id) }
-            : e
-        ),
-      })));
-    } else if (req.type === 'edit' && req.originalData) {
-      if (req.recordType === 'entity') {
-        const { dataItems, id, ...rest } = req.originalData as Entity;
-        void dataItems;
-        commitUpdateEntity(id, rest);
-      } else {
-        const { id, ...rest } = req.originalData as DataItem;
-        commitUpdateDataItem(id, rest);
-      }
-    }
-  };
-
-  const undoApproveBatch = (items: ChangeRequest[]) => {
-    items.forEach(uncommitOne);
-    const ids = items.map(i => i.id);
-    setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'pending' as const, rejectionReason: undefined, reviewedBy: undefined, reviewedAt: undefined } : r));
-  };
-
   /** Approve every pending item in this request (batchId) — there is no partial approval. */
   const approve = (batchId: string) => {
     const items = requests.filter(r => r.batchId === batchId && r.status === 'pending');
@@ -224,13 +190,8 @@ export function useCatalog() {
     const reviewedAt = new Date().toISOString();
     setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'approved' as const, reviewedBy: CURRENT_APPROVER, reviewedAt } : r));
 
-    toast.success(`Approved request (${items.length} item${items.length !== 1 ? 's' : ''})`, {
-      action: { label: 'Undo', onClick: () => undoApproveBatch(items) },
-    });
+    toast.success(`Approved request (${items.length} item${items.length !== 1 ? 's' : ''})`);
   };
-
-  const undoRejectBatch = (ids: string[]) =>
-    setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'pending' as const, rejectionReason: undefined, reviewedBy: undefined, reviewedAt: undefined } : r));
 
   /** Reject every pending item in this request (batchId) — there is no partial rejection. The
    * reason is stored on the request itself (rejectionReason, shown as its own banner in the UI)
@@ -244,9 +205,7 @@ export function useCatalog() {
     const reviewedAt = new Date().toISOString();
     setRequests(prev => prev.map(r => ids.includes(r.id) ? { ...r, status: 'rejected' as const, rejectionReason: reason, reviewedBy: CURRENT_APPROVER, reviewedAt } : r));
 
-    toast.error(`Rejected request (${ids.length} item${ids.length !== 1 ? 's' : ''})`, {
-      action: { label: 'Undo', onClick: () => undoRejectBatch(ids) },
-    });
+    toast.error(`Rejected request (${ids.length} item${ids.length !== 1 ? 's' : ''})`);
   };
 
   /**
@@ -287,6 +246,23 @@ export function useCatalog() {
     toast.success('Request updated and resubmitted for approval');
   };
 
+  /**
+   * Board member withdraws a PENDING request before it's been reviewed. Unlike
+   * approve/reject, there is no "withdrawn" status to track on the request — every item in
+   * the batch is removed from `requests` outright, so it disappears from both the board
+   * member's "My Requests" and the approver's queue at once. Only pending items are eligible
+   * (mirrors approve/reject's "whole batch, pending only" granularity); once a request has
+   * been approved or rejected it can no longer be withdrawn.
+   */
+  const withdraw = (batchId: string) => {
+    const items = requests.filter(r => r.batchId === batchId && r.status === 'pending');
+    if (items.length === 0) return;
+
+    setRequests(prev => prev.filter(r => r.batchId !== batchId));
+
+    toast.success('Request withdrawn');
+  };
+
   return {
     subjectAreas,
     requests,
@@ -297,6 +273,7 @@ export function useCatalog() {
     approve,
     reject,
     reviseAndResubmit,
+    withdraw,
     itemComments,
     addItemComment,
     batchComments,

@@ -37,28 +37,35 @@ npm run typecheck  # tsc --noEmit (see gotcha below)
 
 ## Architecture
 
-`src/main.tsx` → `src/app/App.tsx` (default export). `App` is **routing + composition only**;
-the catalog/request state and every mutation live in the `useCatalog` hook:
+`src/main.tsx` → `src/app/App.tsx` (default export). `App` is **routing + composition only**
+— it owns no UI of its own beyond picking which screen to render; the catalog/request state and
+every mutation live in the `useCatalog` hook, and each role's entire screen (header, tabs, modal
+state, the lot) is its own component that `App` just wires `useCatalog`'s state/actions into:
 
 - `role === 'selection'` → `LandingPage` (pick Board Member or Approver)
-- `role === 'board'`     → Board Member portal (inline in `App.tsx`)
+- `role === 'board'`     → `BoardPortal`
 - `role === 'approver'`  → `ApproverPortal`
 
 `useCatalog()` (`hooks/useCatalog.ts`) owns `subjectAreas` (the catalog) and `requests` (the
-approval queue) and exposes the board submit + approve/reject actions. `App` just wires those
-into the UI and closes modals.
+approval queue) and exposes the board submit + approve/reject/withdraw actions. `App` just wires
+those into whichever portal is active.
 
 ### Key files
 ```
 src/app/
-  App.tsx              Role routing + composition; consumes useCatalog (no business logic)
+  App.tsx              Role routing only — picks LandingPage/BoardPortal/ApproverPortal and
+                       wires useCatalog's state/actions into whichever is active; no UI of its own
   types.ts             DataItem · Entity · SubjectArea · ChangeRequest (batchId-grouped) · Comment
+  BoardPortal.tsx      Board Member: Catalog (tree/table, editable via Create/Edit modals) +
+                       My Requests (list of BoardRequestCards → SubmissionDetailView, filtered
+                       All/Pending/Approved/Rejected). Owns its own header/tabs/modal state —
+                       mirrors ApproverPortal's shape so the two portals are easy to compare.
   ApproverPortal.tsx   Approver: Home (tree/table) + Requests (list of SubmissionCards →
                        SubmissionDetailView / FocusModeView; filters, bulk, focus)
   LandingPage.tsx      Role picker
   hooks/
-    useCatalog.ts      The engine: state + commit/submit/approve(batchId)/reject(batchId)/undo
-                       + approver comment state (itemComments, batchComments)
+    useCatalog.ts      The engine: state + commit/submit/approve(batchId)/reject(batchId)/
+                       withdraw(batchId) + approver comment state (itemComments, batchComments)
   lib/                 Framework-free shared logic (single sources of truth):
     catalog.ts         flatten/count/find helpers + computeChangedFields
     submissions.ts      groupRequestsByBatch → Submission (one request = one batchId)
@@ -84,10 +91,11 @@ src/app/
                             status badge, no separate per-row Operation/Status columns) +
                             Approve/Reject (whole request) + generic comment +
                             HierarchyRequestTable scoped to that batch. Also reused
-                            read-only by the Board Member's My Requests (Export button,
-                            comments shown but not editable, reviewer/timestamp shown;
-                            an Edit & Resubmit button appears here too when the request
-                            is rejected, opening ReviseSubmissionView).
+                            read-only by the Board Member's My Requests (comments shown
+                            but not editable, reviewer/timestamp shown once resolved);
+                            Export appears for pending/rejected requests only, not approved
+                            ones; Edit & Resubmit appears only when rejected (opens
+                            ReviseSubmissionView); Withdraw appears only when pending.
     ReviseSubmissionView.tsx Board Member only, rejected requests only: the editable
                             counterpart to SubmissionDetailView — same header/rejection-
                             reason/generic-comment layout, but EditableHierarchyRequestTable
@@ -97,6 +105,8 @@ src/app/
                             carry over) with status flipped back to 'pending'.
     BoardRequestCard.tsx    Board Member's request-list card — operation badge(s),
                             status, and (once resolved) reviewer name + timestamp only.
+                            No Withdraw action here — that only lives in
+                            SubmissionDetailView (click into the request first).
     FocusModeView.tsx   One-request-at-a-time review mode (keyboard-driven), wraps
                         SubmissionDetailView in next/prev/skip/exit chrome
     TreeView/TableView/SearchBar
@@ -106,12 +116,13 @@ src/app/
                        highlighted, same look a create's "all new" gets; an unchanged-entity
                        context row instead opens the plain EntityModal)
     shared/            Cross-component pieces: DiffGrid (+getRequestDiff), RejectDialog,
-                       HierarchyRequestTable (Excel-style table, no per-row approve — Comments
-                       column instead), EditableHierarchyRequestTable (same layout, live
-                       input/select/textarea cells driven by fieldSchema's `kind`/`options` —
-                       used only by ReviseSubmissionView), CommentThread (a comment list +
-                       add-input, reused by both the generic and per-row threads, compact or
-                       roomy), ExcelDropzone (+useExcelImport), MetaCell
+                       WithdrawDialog (board member's withdraw confirmation — no reason needed,
+                       unlike RejectDialog), HierarchyRequestTable (Excel-style table, no per-row
+                       approve — Comments column instead), EditableHierarchyRequestTable (same
+                       layout, live input/select/textarea cells driven by fieldSchema's
+                       `kind`/`options` — used only by ReviseSubmissionView), CommentThread (a
+                       comment list + add-input, reused by both the generic and per-row threads,
+                       compact or roomy), ExcelDropzone (+useExcelImport), MetaCell
     ui/                Modal/ModalHeader, Field (Text/Select/TextArea), Segmented,
                        + shadcn primitives (alert-dialog, button, textarea, label, utils)
 ```
@@ -138,18 +149,16 @@ and hierarchy fields (`parentEntityId`/`parentEntityName` for data items).
 
 - **Approve** (`useCatalog.approve(batchId)`) commits every pending item in
   the batch to `subjectAreas` (entities before their data items, so a new
-  entity exists before its new columns attach), marks the whole batch
-  approved, and shows one sonner **Undo** toast that restores every item.
-  Entity *edits* strip `dataItems`/`id` before applying so they don't wipe the
-  entity's existing fields.
+  entity exists before its new columns attach) and marks the whole batch
+  approved. Entity *edits* strip `dataItems`/`id` before applying so they
+  don't wipe the entity's existing fields.
 - **Reject** (`useCatalog.reject(batchId, reason)`) rejects every pending item
   in the batch with the same reason — no cascade logic is needed since a new
   entity and its own new data items are normally submitted in the same batch
   already. The reason is stored only as `rejectionReason` on each item (shown
   as its own red banner in `SubmissionDetailView`/`RequestDetailModal`) — it
   is deliberately NOT appended to the generic comment thread, so that thread
-  only ever shows comments someone explicitly typed into it. Undo restores
-  every item together.
+  only ever shows comments someone explicitly typed into it.
 - **Revise & Resubmit** (`useCatalog.reviseAndResubmit(batchId, drafts)`): on
   a rejected request, the Board Member can open `ReviseSubmissionView`
   (entry point: the "Edit & Resubmit" button in `SubmissionDetailView`,
@@ -165,6 +174,18 @@ and hierarchy fields (`parentEntityId`/`parentEntityName` for data items).
   to now — so `itemComments`/`batchComments` threads carry straight over
   instead of starting fresh, and the request reappears in the approver's
   pending queue exactly like any other request.
+- **Withdraw** (`useCatalog.withdraw(batchId)`), Board Member only, pending requests only:
+  removes every item in the batch from `requests` outright — there's no "withdrawn" status to
+  track, the request simply disappears from both the Board Member's My Requests and the
+  Approver's queue at once. Confirmed via `WithdrawDialog` (no reason needed, unlike Reject);
+  the button only appears inside `SubmissionDetailView`'s header (click into the request from
+  `BoardRequestCard` first — there's deliberately no shortcut from the list card itself). Once
+  a request is approved or rejected it can no longer be withdrawn — the action disappears from
+  the UI entirely in those states.
+- **My Requests filter** (`BoardPortal.tsx`'s `reqFilter`): defaults to **All** (every submission
+  the Board Member has made, newest first — `groupRequestsByBatch` already sorts that way), with
+  Pending/Approved/Rejected as additional narrowing tabs, same pill-button pattern as the
+  Approver's queue filter.
 - **Cross-request dependency guard** (`ApproverPortal.isBatchBlocked`): a
   request can still contain a data-item create whose parent entity is itself
   a pending create in a *different* request — that other request must be
@@ -254,10 +275,13 @@ Color carries **exactly one meaning** (Nielsen #4 / consistency). When editing U
 
 - Styling is Tailwind utility classes inline. **Semantic status/sensitivity/key colors are
   centralized in `lib/badges.tsx`** — use `classificationBadgeClass` / `sensitivityBadgeClass` /
-  `keyIndicatorBadgeClass` or the `<ClassificationBadge>` / `<SensitivityBadge>` / `<KeyBadge>`
-  components; do not re-add inline `switch (classification)` color maps. Class strings there are
-  full literals on purpose (Tailwind v4 scans source for complete class names — never build them
-  via template strings).
+  `keyIndicatorBadgeClass` / `submissionStatusBadgeClass` or the `<ClassificationBadge>` /
+  `<SensitivityBadge>` / `<KeyBadge>` / `<SubmissionStatusBadge>` components; do not re-add inline
+  `switch (classification)` color maps or a local `STATUS_BADGE` literal — `SubmissionStatusBadge`
+  (with its `tone: 'subtle' | 'solid'` and `size: 'sm' | 'md'` props) is the one source of truth
+  for the pending/approved/rejected pill everywhere it appears (SubmissionCard, BoardRequestCard,
+  SubmissionDetailView, RequestDetailModal). Class strings there are full literals on purpose
+  (Tailwind v4 scans source for complete class names — never build them via template strings).
 - **Record-type icons (Subject Area = blue · Entity = purple · Data item = green) go through
   `<RecordTypeIcon>` in `lib/badges.tsx`** — pass `type` + `size` (`xs`/`sm`/`md`/`lg`), plus
   `muted` (read-only context) or `boxless` (bare glyph for tight inline rows). It owns the glyph
