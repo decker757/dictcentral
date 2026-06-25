@@ -7,7 +7,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ChevronLeft, SkipForward, X, CheckCheck } from 'lucide-react';
 import { ChangeRequest, Comment, Entity, SubjectArea } from '../types';
-import { groupRequestsByBatch } from '../lib/submissions';
+import { groupRequestsByBatch, Submission } from '../lib/submissions';
 import { SubmissionDetailView } from './SubmissionDetailView';
 import { RejectDialog } from './shared/RejectDialog';
 
@@ -27,8 +27,11 @@ interface FocusModeViewProps {
   batchComments: Record<string, Comment[]>;
   onAddBatchComment: (batchId: string, text: string) => void;
   isBatchBlocked: (batchId: string) => boolean;
-  /** Label for the approve button — see SubmissionDetailView. */
-  approveLabel?: string;
+  /** Label for the approve button — see SubmissionDetailView. A function lets the label vary
+   * per request as the queue advances (e.g. DGO one-stage "Approve & Apply" vs two-stage
+   * "Approve & Forward to HOD", which can differ from one request to the next in the same
+   * queue). A plain string applies to every request the same way. */
+  approveLabel?: string | ((submission: Submission) => string);
   /** HOD view: per-item comments are read-only — see SubmissionDetailView. */
   disableItemComments?: boolean;
 }
@@ -57,6 +60,9 @@ export function FocusModeView({
   const current = currentBatchId ? submissions.find(s => s.batchId === currentBatchId) : undefined;
 
   const blocked = current ? isBatchBlocked(current.batchId) : false;
+  const resolvedApproveLabel = current
+    ? (typeof approveLabel === 'function' ? approveLabel(current) : approveLabel)
+    : undefined;
 
   useEffect(() => {
     setItemDrafts({});
@@ -183,7 +189,7 @@ export function FocusModeView({
         onBack={onExit}
         onApprove={approveCurrent}
         onReject={openReject}
-        approveLabel={approveLabel}
+        approveLabel={resolvedApproveLabel}
         disableItemComments={disableItemComments}
         onEntityClick={onEntityClick}
         onRowClick={onRowClick}

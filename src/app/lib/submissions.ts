@@ -22,10 +22,17 @@ export interface Submission {
   dataItemCount: number;
   subjectAreaNames: string[];
   rejectionReason?: string;
+  /** See ChangeRequest — 'one-stage' means a DGO-originated request approved by a single
+   * named peer DGO (`staffApprover`), with no HOD stage at all. */
+  pipeline?: 'two-stage' | 'one-stage';
+  /** One-stage pipeline only: the peer DGO who must approve this request. */
+  staffApprover?: string;
+  /** The board member's chosen reroute-to HOD, if any — see useCatalog.rerouteToHod. */
+  rerouteHod?: string;
   /** The DGO who approved (forwarded) this submission, and when — set once a DGO has acted on it. */
   dgoReviewedBy?: string;
   dgoReviewedAt?: string;
-  /** Whoever FINALLY resolved this submission (HOD approval, or a rejection at either stage). */
+  /** Whoever FINALLY resolved this submission (HOD/peer-DGO approval, or a rejection at either stage). */
   reviewedBy?: string;
   reviewedAt?: string;
 }
@@ -63,6 +70,9 @@ export function groupRequestsByBatch(requests: ChangeRequest[]): Submission[] {
     const dataItemCount = items.filter(i => i.recordType === 'dataitem').length;
     const subjectAreaNames = Array.from(new Set(items.map(i => i.subjectAreaName)));
     const rejectionReason = items.find(i => i.rejectionReason)?.rejectionReason;
+    const pipeline = items.find(i => i.pipeline)?.pipeline;
+    const staffApprover = items.find(i => i.staffApprover)?.staffApprover;
+    const rerouteHod = items.find(i => i.rerouteHod)?.rerouteHod;
     const dgoReviewedBy = items.find(i => i.dgoReviewedBy)?.dgoReviewedBy;
     const dgoReviewedAt = items.find(i => i.dgoReviewedAt)?.dgoReviewedAt;
     const reviewedBy = items.find(i => i.reviewedBy)?.reviewedBy;
@@ -73,6 +83,7 @@ export function groupRequestsByBatch(requests: ChangeRequest[]): Submission[] {
       stage: sorted[0].stage,
       operations: deriveOperations(items),
       items, entityCount, dataItemCount, subjectAreaNames, rejectionReason,
+      pipeline, staffApprover, rerouteHod,
       dgoReviewedBy, dgoReviewedAt, reviewedBy, reviewedAt,
     };
   });

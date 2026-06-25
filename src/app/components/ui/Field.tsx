@@ -97,10 +97,10 @@ interface TextAreaFieldProps extends BaseProps {
 
 export function TextAreaField({
   value, onChange, rows = 3, placeholder,
-  label, ring = 'blue', density, colSpan2,
+  label, ring = 'blue', density, colSpan2, required,
 }: TextAreaFieldProps) {
   return (
-    <FieldShell label={label} colSpan2={colSpan2} density={density}>
+    <FieldShell label={label} required={required} colSpan2={colSpan2} density={density}>
       <textarea
         className={`${controlClass(ring, density)} resize-none`}
         rows={rows}

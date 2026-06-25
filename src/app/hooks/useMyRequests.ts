@@ -4,6 +4,11 @@
 // for their own create/edit/delete submissions — see ApproverPortal's
 // self-approval-prevention notes). Renders nothing itself — see
 // components/MyRequestsPanel.tsx for the shared JSX that consumes this.
+//
+// `onReroute` is Board-only — DGOs submit via the one-stage peer-review
+// pipeline (see useCatalog), which has no HOD involvement at all, so
+// rerouting to an HOD makes no sense there. Omit it and the panel simply
+// won't render a Reroute button/dialog.
 
 import { useState, useMemo } from 'react';
 import { ChangeRequest, Comment, RecordAttributes } from '../types';
@@ -19,15 +24,18 @@ interface UseMyRequestsOptions {
   batchComments: Record<string, Comment[]>;
   onReviseAndResubmit: (batchId: string, drafts: Record<string, Partial<RecordAttributes>>) => void;
   onWithdraw: (batchId: string) => void;
+  /** Board only — see file header. */
+  onReroute?: (batchId: string, hodName: string, comment: string) => void;
 }
 
 export function useMyRequests({
-  requests, submittedBy, itemComments, batchComments, onReviseAndResubmit, onWithdraw,
+  requests, submittedBy, itemComments, batchComments, onReviseAndResubmit, onWithdraw, onReroute,
 }: UseMyRequestsOptions) {
   const [filter, setFilter] = useState<MyRequestFilter>('all');
   const [openBatchId, setOpenBatchId] = useState<string | null>(null);
   const [revisingBatchId, setRevisingBatchId] = useState<string | null>(null);
   const [withdrawingBatchId, setWithdrawingBatchId] = useState<string | null>(null);
+  const [reroutingBatchId, setReroutingBatchId] = useState<string | null>(null);
 
   const myRequests = useMemo(() => requests.filter(r => r.submittedBy === submittedBy), [requests, submittedBy]);
   const allSubmissions = useMemo(() => groupRequestsByBatch(myRequests), [myRequests]);
@@ -68,6 +76,14 @@ export function useMyRequests({
     setWithdrawingBatchId(null);
   };
 
+  const requestReroute = (batchId: string) => setReroutingBatchId(batchId);
+  const cancelReroute = () => setReroutingBatchId(null);
+  const confirmReroute = (hodName: string, comment: string) => {
+    if (!reroutingBatchId) return;
+    onReroute?.(reroutingBatchId, hodName, comment);
+    setReroutingBatchId(null);
+  };
+
   return {
     filter, setFilter,
     pendingCount, approvedCount, rejectedCount, filteredSubmissions,
@@ -75,6 +91,8 @@ export function useMyRequests({
     revisingBatchId, startRevising, cancelRevising, resubmit,
     exportSubmission,
     withdrawingBatchId, requestWithdraw, cancelWithdraw, confirmWithdraw,
+    rerouteEnabled: !!onReroute,
+    reroutingBatchId, requestReroute, cancelReroute, confirmReroute,
   };
 }
 

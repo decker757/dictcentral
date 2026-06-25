@@ -6,7 +6,7 @@
 
 import { ChangeRequest } from '../../types';
 import { RECORD_FIELDS, FieldDef } from '../../lib/fieldSchema';
-import { formatValue, isEmptyValue } from '../../lib/format';
+import { formatValue, isEmptyValue, getValueTransition } from '../../lib/format';
 
 interface FieldRowProps {
   label: string;
@@ -18,14 +18,13 @@ interface FieldRowProps {
 
 export function FieldRow({ label, value, isChanged, originalValue, isCreate }: FieldRowProps) {
   const display = formatValue(value);
-  const originalDisplay = originalValue !== undefined ? formatValue(originalValue) : null;
   if (display === '—' && !isChanged) return null;
 
   // The OPERATION (create / edit / delete) belongs to the whole request — it's shown once on
   // the request's badge — so it isn't re-stated on every field. Cards stay a calm neutral and
   // color is spent only where it varies *per field*: the value change. The prior value is muted
   // + struck through, the new value is green, so an edit reads as a real before → after.
-  const showTransition = isChanged && !isCreate && originalDisplay !== null && originalDisplay !== '—';
+  const { showTransition, originalDisplay } = getValueTransition(value, originalValue, isCreate);
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
@@ -131,9 +130,7 @@ export function InlineChangePreview({ diff, cap = INLINE_PREVIEW_CAP }: { diff: 
       {visible.map(({ key, label }) => {
         const proposedVal = diff.proposed[key as string];
         const originalVal = diff.original ? diff.original[key as string] : undefined;
-        const proposedDisplay = formatValue(proposedVal);
-        const originalDisplay = formatValue(originalVal);
-        const showTransition = originalDisplay !== '—' && originalDisplay !== proposedDisplay;
+        const { showTransition, newDisplay: proposedDisplay, originalDisplay } = getValueTransition(proposedVal, originalVal, false);
         return (
           <span key={key as string} className="inline-flex items-center gap-1 text-xs max-w-[280px]">
             <span className="font-semibold text-gray-600 flex-shrink-0">{label}</span>

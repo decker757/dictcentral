@@ -29,7 +29,7 @@ interface CatalogRecordModalsProps {
 
 export function CatalogRecordModals({ subjectAreas, searchQuery, modals }: CatalogRecordModalsProps) {
   const {
-    modal, closeModal,
+    modal, closeModal, mode,
     openEntity, openDataItem,
     handleCreateEntity, handleCreateDataItem, handleEditEntity, handleEditDataItem,
     pendingDelete, requestDeleteEntity, requestDeleteDataItem, cancelDelete, confirmDelete,
@@ -72,6 +72,7 @@ export function CatalogRecordModals({ subjectAreas, searchQuery, modals }: Catal
       {modal?.type === 'create' && (
         <CreateModal
           subjectAreas={subjectAreas}
+          mode={mode}
           onClose={closeModal}
           onCreateEntity={handleCreateEntity}
           onCreateDataItem={handleCreateDataItem}
@@ -80,6 +81,7 @@ export function CatalogRecordModals({ subjectAreas, searchQuery, modals }: Catal
       {modal?.type === 'edit' && (
         <EditModal
           subjectAreas={subjectAreas}
+          mode={mode}
           onClose={closeModal}
           onUpdateEntity={handleEditEntity}
           onUpdateDataItem={handleEditDataItem}
@@ -94,6 +96,7 @@ export function CatalogRecordModals({ subjectAreas, searchQuery, modals }: Catal
         recordName={pendingDelete?.name}
         recordType={pendingDelete?.recordType}
         childCount={pendingDelete?.recordType === 'entity' ? pendingDelete.childCount : undefined}
+        mode={mode}
         onClose={cancelDelete}
         onConfirm={confirmDelete}
       />

@@ -1,27 +1,40 @@
 import { useState } from 'react';
-import { Plus, Database, FileText, CheckCircle, Download, FileSpreadsheet } from 'lucide-react';
-import { Entity, DataItem, SubjectArea } from '../../types';
+import { Plus, Database, FileText, CheckCircle, Download, FileSpreadsheet, ShieldCheck, Route } from 'lucide-react';
+import { Entity, DataItem, SubjectArea, RecordAttributes } from '../../types';
 import { Modal, ModalHeader } from '../ui/Modal';
 import { Segmented } from '../ui/Segmented';
 import { TextField, SelectField, TextAreaField } from '../ui/Field';
 import { ExcelDropzone, useExcelImport } from '../shared/ExcelDropzone';
+import { ValidationSummary } from '../shared/ValidationSummary';
 import { flattenEntities } from '../../lib/catalog';
-import { DATA_TYPES, CLASSIFICATIONS, SENSITIVITY_LEVELS, ENTITY_STATUSES, KEY_INDICATORS } from '../../lib/constants';
+import { DATA_TYPES, CLASSIFICATIONS, SENSITIVITY_LEVELS, ENTITY_STATUSES, KEY_INDICATORS, DGO_DIRECTORY, HOD_DIRECTORY, CURRENT_DGO } from '../../lib/constants';
+import { validateRecordForm, FieldError, SoftWarning } from '../../lib/validation';
+import { RequestOpts } from '../../hooks/useCatalog';
 
 interface CreateModalProps {
   subjectAreas: SubjectArea[];
+  /** 'dgo' shows the compulsory Staff Approver picker (one-stage peer review); 'board'
+   * shows the optional Reroute-to-Another-HOD checkbox. */
+  mode?: 'board' | 'dgo';
   onClose: () => void;
-  onCreateEntity: (subjectAreaId: string, entity: Entity) => void;
-  onCreateDataItem: (entityId: string, dataItem: DataItem) => void;
+  onCreateEntity: (subjectAreaId: string, entity: Entity, opts?: RequestOpts) => void;
+  onCreateDataItem: (entityId: string, dataItem: DataItem, opts?: RequestOpts) => void;
 }
 
 type Method = 'form' | 'excel';
 type RecordType = 'entity' | 'dataitem';
 
-export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDataItem }: CreateModalProps) {
+export function CreateModal({ subjectAreas, mode = 'board', onClose, onCreateEntity, onCreateDataItem }: CreateModalProps) {
   const [method, setMethod] = useState<Method>('form');
   const [recordType, setRecordType] = useState<RecordType>('dataitem');
   const imp = useExcelImport(() => Math.floor(Math.random() * 40) + 5);
+
+  // Validate Fields → real submit button. Reset to unvalidated the moment any field changes,
+  // so a stale pass can never carry over to edited values — see setE/setD/setRecordType below.
+  const [validated, setValidated] = useState(false);
+  const [errors, setErrors] = useState<FieldError[]>([]);
+  const [warnings, setWarnings] = useState<SoftWarning[]>([]);
+  const invalidate = () => setValidated(false);
 
   const [entityForm, setEntityForm] = useState({
     name: '', technicalName: '', description: '', owner: '', steward: '',
@@ -38,12 +51,69 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
     transformationLogic: '', entityId: '',
   });
 
+  // Mode-specific extras (mutually exclusive with each other, picked per `mode`)
+  const [staffApprover, setStaffApprover] = useState('');
+  const [rerouteChecked, setRerouteChecked] = useState(false);
+  const [rerouteHod, setRerouteHod] = useState('');
+  const [rerouteComment, setRerouteComment] = useState('');
+
   const allEntities = flattenEntities(subjectAreas);
-  const setE = (k: string, v: string) => setEntityForm(f => ({ ...f, [k]: v }));
-  const setD = (k: string, v: string) => setDiForm(f => ({ ...f, [k]: v }));
+  const setE = (k: string, v: string) => { setEntityForm(f => ({ ...f, [k]: v })); invalidate(); };
+  const setD = (k: string, v: string) => { setDiForm(f => ({ ...f, [k]: v })); invalidate(); };
+  const changeRecordType = (rt: RecordType) => { setRecordType(rt); invalidate(); };
+
+  const buildEntityRecord = (): Partial<RecordAttributes> => ({
+    name: entityForm.name,
+    technicalName: entityForm.technicalName || entityForm.name.toLowerCase().replace(/\s+/g, '_'),
+    description: entityForm.description, owner: entityForm.owner, steward: entityForm.steward,
+    sourceSystem: entityForm.sourceSystem, recordCount: entityForm.recordCount,
+    refreshFrequency: entityForm.refreshFrequency,
+    classification: entityForm.classification as RecordAttributes['classification'],
+    status: entityForm.status as RecordAttributes['status'],
+  });
+
+  const buildDataItemRecord = (): Partial<RecordAttributes> => ({
+    name: diForm.name,
+    technicalName: diForm.technicalName || diForm.name.toLowerCase().replace(/\s+/g, '_'),
+    dataType: diForm.dataType, length: diForm.length,
+    classification: diForm.classification as RecordAttributes['classification'],
+    sensitivityLevel: diForm.sensitivityLevel as RecordAttributes['sensitivityLevel'],
+    description: diForm.description, steward: diForm.steward, validationRule: diForm.validationRule,
+  });
+
+  /** Compulsory-field/structural checks beyond the record's own attributes — parent
+   * selection, and whichever mode-specific extra applies. */
+  const structuralErrors = (): FieldError[] => {
+    const errs: FieldError[] = [];
+    if (recordType === 'entity' && !entityForm.subjectAreaId) errs.push({ field: 'subjectAreaId', message: 'Subject Area is required.' });
+    if (recordType === 'dataitem' && !diForm.entityId) errs.push({ field: 'entityId', message: 'Parent Entity is required.' });
+    if (mode === 'dgo' && !staffApprover) {
+      errs.push({ field: 'staffApprover', message: 'Staff Approver is required \u2014 select another DGO to approve this request.' });
+    }
+    if (mode === 'board' && rerouteChecked) {
+      if (!rerouteHod) errs.push({ field: 'rerouteHod', message: 'Select an HOD to reroute to.' });
+      if (!rerouteComment.trim()) errs.push({ field: 'rerouteComment', message: 'A comment explaining the reroute is required.' });
+    }
+    return errs;
+  };
+
+  const handleValidate = () => {
+    const record = recordType === 'entity' ? buildEntityRecord() : buildDataItemRecord();
+    const result = validateRecordForm(record, recordType);
+    const allErrors = [...structuralErrors(), ...result.errors];
+    setErrors(allErrors);
+    setWarnings(result.warnings);
+    setValidated(allErrors.length === 0);
+  };
+
+  const buildOpts = (): RequestOpts | undefined => {
+    if (mode === 'dgo') return staffApprover ? { staffApprover } : undefined;
+    if (mode === 'board' && rerouteChecked) return { rerouteHod, rerouteComment: rerouteComment.trim() };
+    return undefined;
+  };
 
   const handleCreateEntity = () => {
-    if (!entityForm.name || !entityForm.subjectAreaId) return;
+    if (!validated) return;
     onCreateEntity(entityForm.subjectAreaId, {
       id: `e-${Date.now()}`,
       name: entityForm.name,
@@ -60,12 +130,12 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
       schemaVersion: entityForm.schemaVersion, slaTarget: entityForm.slaTarget,
       qualityScore: 100,
       lastUpdated: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    });
+    }, buildOpts());
     onClose();
   };
 
   const handleCreateDataItem = () => {
-    if (!diForm.name || !diForm.entityId) return;
+    if (!validated) return;
     onCreateDataItem(diForm.entityId, {
       id: `di-${Date.now()}`,
       name: diForm.name,
@@ -85,7 +155,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
       transformationLogic: diForm.transformationLogic || undefined,
       allowedValues: [],
       lastUpdated: new Date().toISOString().slice(0, 10),
-    });
+    }, buildOpts());
     onClose();
   };
 
@@ -112,7 +182,7 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
         {method === 'form' && (
           <Segmented<RecordType>
             value={recordType}
-            onChange={setRecordType}
+            onChange={changeRecordType}
             options={[
               { value: 'dataitem', label: 'Data Item', icon: <FileText className="w-3.5 h-3.5" />, activeClass: 'bg-green-600 text-white' },
               { value: 'entity', label: 'Entity', icon: <Database className="w-3.5 h-3.5" />, activeClass: 'bg-purple-600 text-white' },
@@ -217,6 +287,64 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
             <TextAreaField colSpan2 label="Description / Business Definition" value={entityForm.description} onChange={v => setE('description', v)} />
           </div>
         )}
+
+        {/* Mode-specific extras — shown for both record types, form method only */}
+        {method === 'form' && mode === 'dgo' && (
+          <div className="mt-5 pt-4 border-t border-gray-100">
+            <label className="text-[10px] uppercase tracking-wide text-gray-500 block mb-1">Staff Approver (required) *</label>
+            <select
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+              value={staffApprover}
+              onChange={e => { setStaffApprover(e.target.value); invalidate(); }}
+            >
+              <option value="">— Select another DGO to approve this request —</option>
+              {DGO_DIRECTORY.filter(d => d.name !== CURRENT_DGO).map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">
+              One-stage peer review — once they approve, this is applied immediately (no HOD review).
+            </p>
+          </div>
+        )}
+        {method === 'form' && mode === 'board' && (
+          <div className="mt-5 pt-4 border-t border-gray-100">
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rerouteChecked}
+                onChange={e => { setRerouteChecked(e.target.checked); invalidate(); }}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
+              />
+              <Route className="w-4 h-4 text-blue-500" /> Re-route to Another HOD
+            </label>
+            {rerouteChecked && (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] uppercase tracking-wide text-gray-500 block mb-1">Reroute to HOD *</label>
+                  <select
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                    value={rerouteHod}
+                    onChange={e => { setRerouteHod(e.target.value); invalidate(); }}
+                  >
+                    <option value="">— Select HOD —</option>
+                    {HOD_DIRECTORY.map(h => <option key={h.name} value={h.name}>{h.name}{h.department ? ` — ${h.department}` : ''}</option>)}
+                  </select>
+                </div>
+                <TextAreaField
+                  colSpan2 label="Reason for reroute" required rows={2}
+                  value={rerouteComment}
+                  onChange={v => { setRerouteComment(v); invalidate(); }}
+                  placeholder="e.g. HOD is on leave until next week"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {method === 'form' && (errors.length > 0 || warnings.length > 0) && (
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <ValidationSummary errors={errors} warnings={warnings} />
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -226,7 +354,15 @@ export function CreateModal({ subjectAreas, onClose, onCreateEntity, onCreateDat
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
             Cancel
           </button>
-          {method === 'form' && (
+          {method === 'form' && !validated && (
+            <button
+              onClick={handleValidate}
+              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+            >
+              <ShieldCheck className="w-4 h-4" /> Validate Fields
+            </button>
+          )}
+          {method === 'form' && validated && (
             <button
               onClick={recordType === 'entity' ? handleCreateEntity : handleCreateDataItem}
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"

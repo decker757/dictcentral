@@ -18,15 +18,16 @@ import { SubjectAreaGroup, EntityBlock } from '../../lib/requestGroups';
 import { RECORD_FIELDS, REQUIRED_RECORD_FIELDS, FieldKind, fieldInputValue, parseFieldInput } from '../../lib/fieldSchema';
 import { formatValue } from '../../lib/format';
 import { findEntityById } from '../../lib/catalog';
+import { ENTITY_NAME_COL_WIDTH, TECHNICAL_NAME_COL_WIDTH, TECHNICAL_NAME_COL_LEFT } from '../../lib/tableLayout';
 import { RecordTypeIcon } from '../../lib/badges';
 import { CommentThread } from './CommentThread';
+import { EntityGroupHeader } from './EntityGroupHeader';
+import { TreeConnector } from './TreeConnector';
 
 /** One row's in-progress edits, keyed by ChangeRequest id. Always a full RecordAttributes-shaped
  * draft (seeded from proposedData) so every field — touched or not — has a current value. */
 export type DraftMap = Record<string, RecordAttributes>;
 
-const NAME_W = 220;
-const TECH_W = 170;
 const COMMENT_W = 240;
 
 const OTHER_FIELDS = RECORD_FIELDS.filter(f => f.key !== 'name' && f.key !== 'technicalName');
@@ -126,7 +127,7 @@ function EditableEntityGroupTable({
     : (contextEntity?.name ?? contextName);
 
   const nameLeft = 0;
-  const techLeft = nameLeft + NAME_W;
+  const techLeft = TECHNICAL_NAME_COL_LEFT;
 
   const renderEditableRow = (req: ChangeRequest, isChild: boolean) => {
     const draft = drafts[req.id] ?? (req.proposedData as RecordAttributes);
@@ -137,15 +138,10 @@ function EditableEntityGroupTable({
       <tr key={req.id} className={rowBg}>
         <td
           className={`sticky z-10 ${rowBg} border-b border-r border-gray-100 px-2 py-1.5`}
-          style={{ left: nameLeft, width: NAME_W }}
+          style={{ left: nameLeft, width: ENTITY_NAME_COL_WIDTH }}
         >
           <div className="flex items-center min-w-0 gap-1">
-            {isChild && (
-              <span className="relative flex-shrink-0" style={{ width: 22, height: 20 }} aria-hidden="true">
-                <span className="absolute left-2.5 top-0 bottom-0 w-px bg-gray-300" />
-                <span className="absolute left-2.5 top-1/2 w-2.5 h-px bg-gray-300" />
-              </span>
-            )}
+            {isChild && <TreeConnector size="compact" />}
             <RecordTypeIcon type={req.recordType} size="xs" boxless className="flex-shrink-0" />
             <input
               className={`flex-1 min-w-0 text-xs font-medium border rounded-md px-1.5 py-1 outline-none focus:ring-2 focus:ring-blue-400 bg-white ${
@@ -158,7 +154,7 @@ function EditableEntityGroupTable({
         </td>
         <td
           className={`sticky z-10 ${rowBg} border-b border-gray-100 px-2 py-1.5 shadow-[3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
-          style={{ left: techLeft, width: TECH_W }}
+          style={{ left: techLeft, width: TECHNICAL_NAME_COL_WIDTH }}
         >
           <input
             className={`w-full text-[11px] font-mono border rounded-md px-1.5 py-1 outline-none focus:ring-2 focus:ring-blue-400 bg-white ${
@@ -200,7 +196,7 @@ function EditableEntityGroupTable({
       <tr className={rowBg}>
         <td
           className={`sticky z-10 ${rowBg} border-b border-r border-gray-100 px-3 py-2 font-semibold text-gray-600`}
-          style={{ left: nameLeft, width: NAME_W }}
+          style={{ left: nameLeft, width: ENTITY_NAME_COL_WIDTH }}
         >
           <div className="flex items-center min-w-0 gap-1.5">
             <RecordTypeIcon type="entity" size="xs" boxless muted className="flex-shrink-0" />
@@ -209,7 +205,7 @@ function EditableEntityGroupTable({
         </td>
         <td
           className={`sticky z-10 ${rowBg} border-b border-gray-100 px-3 py-2 font-mono text-[11px] text-gray-500 shadow-[3px_0_5px_-3px_rgba(0,0,0,0.08)]`}
-          style={{ left: techLeft, width: TECH_W }}
+          style={{ left: techLeft, width: TECHNICAL_NAME_COL_WIDTH }}
         >
           {formatValue(values['technicalName'])}
         </td>
@@ -227,30 +223,21 @@ function EditableEntityGroupTable({
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-      <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200 flex-wrap">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <RecordTypeIcon type="entity" size="sm" muted={!isParentRequest} />
-          <span className="text-sm font-semibold text-gray-800 truncate">{parentName}</span>
-          {subjectAreaName && (
-            <span className="text-[11px] font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full flex-shrink-0">
-              {subjectAreaName}
-            </span>
-          )}
-          {!isParentRequest && <span className="text-xs font-medium text-gray-400 flex-shrink-0">unchanged</span>}
-          <span className="text-xs text-gray-400 flex-shrink-0">
-            {block.children.length} data item{block.children.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-      </div>
+      <EntityGroupHeader
+        name={parentName}
+        isContext={!isParentRequest}
+        subjectAreaName={subjectAreaName}
+        childCount={block.children.length}
+      />
 
       <div className="overflow-auto max-h-[60vh]">
         <table className="border-separate text-xs w-full" style={{ borderSpacing: 0 }}>
           <thead>
             <tr>
-              <th className="sticky top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap" style={{ left: nameLeft, width: NAME_W, minWidth: NAME_W }}>
+              <th className="sticky top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap" style={{ left: nameLeft, width: ENTITY_NAME_COL_WIDTH, minWidth: ENTITY_NAME_COL_WIDTH }}>
                 Business Name<span className="text-red-500"> *</span>
               </th>
-              <th className="sticky top-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[3px_0_5px_-3px_rgba(0,0,0,0.12)]" style={{ left: techLeft, width: TECH_W, minWidth: TECH_W }}>
+              <th className="sticky top-0 z-30 bg-gray-50 border-b border-gray-200 px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap shadow-[3px_0_5px_-3px_rgba(0,0,0,0.12)]" style={{ left: techLeft, width: TECHNICAL_NAME_COL_WIDTH, minWidth: TECHNICAL_NAME_COL_WIDTH }}>
                 Technical Name<span className="text-red-500"> *</span>
               </th>
               {OTHER_FIELDS.map(f => (

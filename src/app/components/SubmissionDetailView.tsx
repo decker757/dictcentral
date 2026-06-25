@@ -25,7 +25,7 @@
 // no Approve/Reject (so no drafts either), the threads — including the
 // generic one — are shown exactly as left by whichever stage reviewed it.
 
-import { ChevronLeft, Clock, Lock, Download, Pencil, Undo2, ShieldCheck, UserCheck } from 'lucide-react';
+import { ChevronLeft, Clock, Lock, Download, Pencil, Undo2, ShieldCheck, UserCheck, Users, Route } from 'lucide-react';
 import { ChangeRequest, Comment, Entity, SubjectArea } from '../types';
 import { Submission } from '../lib/submissions';
 import { groupRequestsBySubjectArea } from '../lib/requestGroups';
@@ -66,6 +66,10 @@ interface SubmissionDetailViewProps {
   onEdit?: () => void;
   /** Board member view, pending request only: opens the withdraw confirmation. */
   onWithdraw?: () => void;
+  /** Board member view, pending request only: opens the "reroute to another HOD" dialog —
+   * shown before the Withdraw button. Omit to hide it (e.g. DGO's one-stage requests never
+   * involve an HOD at all). */
+  onReroute?: () => void;
   /** HOD view: the per-item (data item/entity) Comments column is removed ENTIRELY from the
    * HierarchyRequestTable below — HODs never see DGO-authored per-item comments. HOD still adds
    * the generic, whole-request comment normally. Independent of `readOnly` (HOD still gets
@@ -77,7 +81,7 @@ export function SubmissionDetailView({
   submission, subjectAreas, onBack, onApprove, onReject, onValidate, approveLabel,
   onEntityClick, onRowClick,
   itemComments, genericComments, itemDrafts, onItemDraftChange, genericDraft, onGenericDraftChange,
-  blocked, blockedReason, readOnly, onExport, onEdit, onWithdraw, disableItemComments,
+  blocked, blockedReason, readOnly, onExport, onEdit, onWithdraw, onReroute, disableItemComments,
 }: SubmissionDetailViewProps) {
   const groups = groupRequestsBySubjectArea(submission.items);
   const isPending = submission.status === 'pending';
@@ -113,6 +117,24 @@ export function SubmissionDetailView({
                 <span className="font-semibold text-gray-600">{total}</span> item{total !== 1 ? 's' : ''}
                 {' '}({submission.entityCount} entit{submission.entityCount !== 1 ? 'ies' : 'y'}, {submission.dataItemCount} data item{submission.dataItemCount !== 1 ? 's' : ''})
               </span>
+              {submission.pipeline === 'one-stage' && submission.staffApprover && (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span className="flex items-center gap-1 text-indigo-600">
+                    <Users className="w-3 h-3" />
+                    One-stage peer review — pending: <span className="font-medium">{submission.staffApprover}</span>
+                  </span>
+                </>
+              )}
+              {submission.rerouteHod && (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span className="flex items-center gap-1 text-blue-600">
+                    <Route className="w-3 h-3" />
+                    Rerouted to <span className="font-medium">{submission.rerouteHod}</span>
+                  </span>
+                </>
+              )}
               {!readOnly && submission.dgoReviewedBy && (
                 <>
                   <span className="text-gray-300">·</span>
@@ -152,8 +174,16 @@ export function SubmissionDetailView({
             </div>
           )}
 
-          {readOnly && (onExport || onEdit || onWithdraw) && (
+          {readOnly && (onExport || onEdit || onWithdraw || onReroute) && (
             <div className="flex items-center gap-2 flex-shrink-0">
+              {onReroute && (
+                <button
+                  onClick={onReroute}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-white text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 border border-blue-200 transition-colors shadow-sm"
+                >
+                  <Route className="w-4 h-4" /> Reroute to HOD
+                </button>
+              )}
               {onWithdraw && (
                 <button
                   onClick={onWithdraw}

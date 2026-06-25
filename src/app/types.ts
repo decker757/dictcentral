@@ -106,11 +106,32 @@ export interface ChangeRequest {
   rejectionReason?: string;
   /** Which review stage currently owns this request while it's pending — see RequestStage. */
   stage: RequestStage;
+  /**
+   * 'one-stage' marks a DGO-originated request (a DGO can also submit
+   * create/edit/delete requests, same as a board member) that bypasses the
+   * HOD entirely — a single named peer DGO (`staffApprover`) approves it,
+   * and that approval commits it straight to the catalog. Undefined/
+   * 'two-stage' is the normal board-member pipeline (DGO review, then HOD).
+   * Derived once at submission time from whether a `staffApprover` was
+   * supplied — see useCatalog.submitCreateEntity etc.
+   */
+  pipeline?: 'two-stage' | 'one-stage';
+  /** One-stage pipeline only: the specific peer DGO (never the submitter) who must approve
+   * this request before it commits. Compulsory whenever a DGO submits a request. */
+  staffApprover?: string;
+  /** Board member's chosen reroute target, if any — "the HOD who isn't around" workaround.
+   * Settable at submission time or later while pending (see useCatalog.rerouteToHod). Purely
+   * informational in this single-HOD-session demo; the reroute rationale is always also
+   * appended to the request's generic comment thread so DGO/HOD reviewers see it there. */
+  rerouteHod?: string;
   /** The DGO who approved this request (forwarding it to HOD), and when. Set once, never cleared
-   * by an HOD action — only a revise-and-resubmit (which restarts the whole pipeline) clears it. */
+   * by an HOD action — only a revise-and-resubmit (which restarts the whole pipeline) clears it.
+   * For a one-stage request, set at the SAME time as `reviewedBy` (the approval and the commit
+   * happen together). */
   dgoReviewedBy?: string;
   dgoReviewedAt?: string;
-  /** Whoever FINALLY resolved this request (approved it as HOD, or rejected it at either stage), and when. */
+  /** Whoever FINALLY resolved this request (approved it as HOD or peer DGO, or rejected it at
+   * any stage), and when. */
   reviewedBy?: string;
   reviewedAt?: string;
 

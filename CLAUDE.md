@@ -137,12 +137,20 @@ src/app/
                        metadata) + REQUIRED_RECORD_FIELDS + fieldInputValue/parseFieldInput
                        (typed value ↔ form-control string helpers, used by the revise-and-resubmit
                        table)
-    format.ts          formatValue · isEmptyValue · formatSubmittedAt
+    format.ts          formatValue · isEmptyValue · formatSubmittedAt · getValueTransition (the
+                       ONE place that decides whether a field's old→new transition should
+                       render — edit only, original present, original ≠ new — used by DiffGrid's
+                       FieldRow/InlineChangePreview and HierarchyRequestTable's FieldValueCell,
+                       which previously each re-derived this rule independently)
     constants.ts       option lists (DATA_TYPES, CLASSIFICATIONS, …) + CURRENT_BOARD_MEMBER,
                        CURRENT_DGO, CURRENT_HOD
     exportCsv.ts       buildSubmissionCsv + downloadTextFile — client-side CSV export for the
                        Board Member's "Export" button (UI only, no backend); flattens each
                        comment thread into one cell, one entry per line
+    tableLayout.ts     ENTITY_NAME_COL_WIDTH / TECHNICAL_NAME_COL_WIDTH / TECHNICAL_NAME_COL_LEFT
+                       — the sticky-column pixel widths shared by HierarchyRequestTable and
+                       EditableHierarchyRequestTable, so the two tables' frozen columns can't
+                       silently drift out of alignment with each other
   data/                mockData.ts (catalog) · initialRequests.ts (seed queue + demo data,
                        grouped into 6 demo batchIds, every item seeded at stage 'dgo')
   components/
@@ -193,13 +201,16 @@ src/app/
     TreeView/TableView/SearchBar
     modals/            EntityModal, DataItemModal (both take an optional `onDeleteRequest` —
                        renders a red "Delete" button next to Edit when present, !readOnly),
-                       AdvancedSearchModal, CreateModal, EditModal, ValidateFieldsModal (DGO's
-                       soft-warning panel, see lib/validation.ts),
-                       RequestDetailModal (single-record diff modal opened by clicking any row
-                       in the Excel table — changed fields show old struck-through → new
-                       highlighted, same look a create's "all new" gets, also used for delete
-                       requests which default to Full View with the toggle hidden; an
-                       unchanged-entity context row instead opens the plain EntityModal)
+                       AdvancedSearchModal, RequestDetailModal (single-record diff modal opened
+                       by clicking any row in the Excel table — changed fields show old
+                       struck-through → new highlighted, same look a create's "all new" gets,
+                       also used for delete requests which default to Full View with the toggle
+                       hidden; an unchanged-entity context row instead opens the plain
+                       EntityModal), ValidateFieldsModal (DGO-only, opened from
+                       SubmissionDetailView's "Validate Fields" button — review-time SOFT
+                       warnings only, see lib/validation.ts; distinct from the HARD validation
+                       below), CreateModal/EditModal (take a `mode: 'board' | 'dgo'` prop — see
+                       "Validate Fields → Submit" below for what each mode adds)
     shared/            Cross-component pieces: CatalogRecordModals.tsx (renders EntityModal/
                        DataItemModal/AdvancedSearchModal/CreateModal/EditModal/
                        RequestDetailModal/DeleteConfirmDialog from useCatalogModals' state —
@@ -207,14 +218,28 @@ src/app/
                        WithdrawDialog (board/DGO's withdraw confirmation — no reason needed,
                        unlike RejectDialog), DeleteConfirmDialog (confirms a delete REQUEST, not
                        an immediate delete — used from EntityModal/DataItemModal's Delete
-                       button), HierarchyRequestTable (Excel-style table, no per-row
+                       button; takes the same `mode: 'board' | 'dgo'` prop as CreateModal/
+                       EditModal, so a delete request gets the matching Staff Approver/Reroute
+                       section too — see "Validate Fields → Submit" below), RerouteDialog (the
+                       My-Requests-tab counterpart to the reroute section in Create/Edit/
+                       Delete — same HOD-select + required-comment shape, opened from
+                       SubmissionDetailView's "Reroute to HOD" button instead of a surrounding
+                       form), ValidationSummary (the red hard-error / amber soft-warning banner
+                       shown inside CreateModal/EditModal once "Validate Fields" has been
+                       clicked), HierarchyRequestTable (Excel-style table, no per-row
                        approve — Comments column instead, `readOnly` controls just that
                        column's input, `hideComments` removes the WHOLE column — header + cells
                        — used by the HOD view), EditableHierarchyRequestTable (same layout, live
                        input/select/textarea cells driven by fieldSchema's `kind`/`options` —
                        used only by ReviseSubmissionView), CommentThread (a comment list +
                        add-input, reused by both the generic and per-row threads, compact or
-                       roomy), ExcelDropzone (+useExcelImport), MetaCell
+                       roomy), ExcelDropzone (+useExcelImport), MetaCell, EntityGroupHeader (the
+                       icon/name/subject-area-badge/"unchanged"/item-count identity strip atop
+                       each entity group in BOTH hierarchy tables — the read-only table supplies
+                       its Full View/Changes Only toggle via the `trailing` slot, the editable
+                       table renders it bare), TreeConnector (the small rail+tick drawn before a
+                       child data-item row in both hierarchy tables; takes a `size: 'normal' |
+                       'compact'` matching which table is rendering it)
     ui/                Modal/ModalHeader, Field (Text/Select/TextArea), Segmented,
                        + shadcn primitives (alert-dialog, button, textarea, label, utils)
 ```
@@ -314,8 +339,12 @@ turns read-only for HODs.
 A `ChangeRequest` has `batchId` (the request it belongs to), `type` (create|edit|delete),
 `recordType` (entity|dataitem), `status`, `stage` (dgo|hod), `proposedData`, optional
 `originalData` + `changedFields`, `submittedBy`, `rejectionReason`, `dgoReviewedBy`/
-`dgoReviewedAt`, `reviewedBy`/`reviewedAt` (whoever FINALLY resolved it), and hierarchy
-fields (`parentEntityId`/`parentEntityName` for data items).
+`dgoReviewedAt`, `reviewedBy`/`reviewedAt` (whoever FINALLY resolved it), `pipeline`
+('two-stage' | 'one-stage', derived from whether `staffApprover` was supplied at submission),
+`staffApprover` (one-stage only — the named peer DGO who must approve it), `rerouteHod` (the
+board member's chosen reroute target, if any), and hierarchy fields (`parentEntityId`/
+`parentEntityName` for data items). See "Validate Fields → Submit, one-stage DGO review, and
+reroute to another HOD" below for the full behavior these three fields drive.
 
 - **Approve** is two calls now, not one: `useCatalog.approveDgo(batchId, dgoName)` just
   forwards the request to the HOD stage (stamps `dgoReviewedBy`/`dgoReviewedAt`, flips
@@ -432,6 +461,78 @@ fields (`parentEntityId`/`parentEntityName` for data items).
   (`orderedPendingBatchIds`) is frozen on entry so the queue doesn't reindex
   as you act. It wraps `SubmissionDetailView` in next/prev/skip/exit chrome.
   Keyboard: `A` approve · `R` reject · `S`/`→` skip · `←` prev · `Esc` exit.
+
+## Validate Fields → Submit, one-stage DGO review, and reroute to another HOD
+
+Three extensions layered onto Create/Edit/Delete after the base approval workflow above was
+built. All three live in the SAME places (`CreateModal`/`EditModal`/`DeleteConfirmDialog`,
+`useCatalog`, `types.ts`), driven by a shared `RequestOpts` (`{ staffApprover?, rerouteHod?,
+rerouteComment? }`) that every `submitCreate*`/`submitEdit*`/`submitDelete*` call in
+`useCatalog` accepts as an optional last argument.
+
+**1. Validate Fields → Submit (hard validation), Create/Edit, both Board and DGO.**
+`CreateModal`/`EditModal`'s footer shows **"Validate Fields"** instead of "Create Data
+Item"/"Save Changes" until the form passes — clicking it runs `lib/validation.ts`'s
+`validateRecordForm` (HARD errors — required fields per `REQUIRED_RECORD_FIELDS`, plus shape
+checks: `technicalName` must match an identifier pattern, `recordCount`/`length`/`qualityScore`
+must be numeric/in-range — see `getHardErrors`) combined with that mode's own structural checks
+(`structuralErrors()` in each modal — parent Entity/Subject Area selected, and whichever
+mode-specific extra below applies). Both hard errors (red) and soft warnings (amber, the
+pre-existing `getSoftWarnings`) render via `ValidationSummary`. Only once there are ZERO hard
+errors does `validated` flip true and the button swaps to the real submit action
+("Create Entity"/"Create Data Item"/"Save Changes"). **Any field edit — including the
+mode-specific extras — immediately calls `invalidate()`**, flipping `validated` back to false,
+so a stale pass can never carry through to changed values; the person must re-validate before
+submitting again. `DeleteConfirmDialog` doesn't validate record fields (there's nothing to
+edit), but its mode-specific section (below) still gates its Confirm button the same way via
+`canConfirm`.
+
+**2. One-stage DGO peer-review pipeline.** When a DGO opens Create/Edit/Delete
+(`mode="dgo"`, set by `BoardPortal`/`ApproverPortal`'s call to `useCatalogModals`), the
+mode-specific section is a **compulsory "Staff Approver" picker** — a `<select>` populated from
+`DGO_DIRECTORY` with `CURRENT_DGO` filtered out (a DGO can never name themselves), required
+before `validated`/`canConfirm` can go true. The chosen name becomes `staffApprover` in the
+submitted `RequestOpts`; `useCatalog.submitCreateEntity`/etc. set `pipeline: 'one-stage'`
+whenever `staffApprover` is present (`pipeline: undefined` — read as `'two-stage'` — otherwise).
+`useCatalog.approveDgo` branches on `items[0].pipeline`: a `'one-stage'` approval calls
+`commitBatch` immediately and marks the batch `'approved'` (stamping BOTH `dgoReviewedBy` and
+`reviewedBy` to the same approver, same timestamp) — there is no HOD stage at all. A
+`'two-stage'` (the default board-originated) approval behaves exactly as before — forwards to
+`stage: 'hod'`, commits nothing yet. Because a one-stage request never reaches `stage: 'hod'`,
+`HODPortal`'s `dgoReviewedBy`-set scoping never picks it up. `SubmissionDetailView`'s header
+shows a `Users`-icon line — "One-stage peer review — pending: {staffApprover}" — for any open
+pipeline `'one-stage'` submission, and `approveLabel` reads "Approve & Apply" instead of
+"Approve & Forward to HOD" (`ApproverPortal`, including in Focus Mode via a per-submission
+`approveLabel` function on `FocusModeView`, since the queue can mix one-stage and two-stage
+requests). **Demo limitation** (single DGO session, same as the pre-existing self-approval-
+prevention note above): nothing here restricts approval to specifically the NAMED
+`staffApprover` — in a real multi-DGO deployment a one-stage request would only appear in that
+named peer's own Review Requests queue; this demo's `ApproverPortal` only ever filters out the
+submitter's own pending request, so any signed-in DGO session can approve it.
+
+**3. Reroute to Another HOD (Board only).** When a board member opens Create/Edit/Delete
+(`mode="board"`, the default), the mode-specific section is an OPTIONAL "Re-route to Another
+HOD" checkbox. Checking it reveals an HOD `<select>` (from `HOD_DIRECTORY`, each entry showing
+its `department`) plus a required "Reason for reroute" textarea — both become compulsory the
+moment the checkbox is checked (`structuralErrors()`/`canConfirm` require BOTH `rerouteHod` and
+a non-empty `rerouteComment` before validation/confirm can pass). At submission,
+`useCatalog.queueRequest` sets `rerouteHod` on the request AND immediately appends
+`"Rerouted to {hod}: {comment}"` to the batch's generic comment thread (authored by the
+submitter), so any DGO/HOD opening the request sees the rationale right away. **Rerouting again
+while pending** (any stage, DGO or HOD): `SubmissionDetailView`'s read-only (My Requests) view
+renders a "Reroute to HOD" button — `onReroute`, shown only when `status === 'pending'`, placed
+immediately before Withdraw — that opens `RerouteDialog` (the same HOD-select + required-comment
+shape, just without a surrounding form). Confirming calls `useCatalog.rerouteToHod(batchId,
+hodName, comment, author)`, which overwrites `rerouteHod` on every pending item in the batch and
+appends the same `"Rerouted to {hod}: {comment}"` line to the generic thread again — so a
+request rerouted more than once keeps every prior rationale visible in the thread, not just the
+latest. `rerouteHod` is purely informational in this single-HOD-session demo (there's no second
+HOD session to actually route the request to) but is always surfaced — a `Route`-icon line in
+`SubmissionDetailView`'s header ("Rerouted to {rerouteHod}"), visible to DGO, HOD, and the board
+member alike. DGOs never get a Reroute option anywhere (`useMyRequests`'s `onReroute` is
+Board-only — `ApproverPortal` doesn't pass it in, so `MyRequestsPanel` simply never renders the
+button/dialog for a DGO's own requests; the one-stage pipeline has no HOD involved at all, so
+rerouting to one would be meaningless there).
 
 ## Design system — semantic color (KEEP CONSISTENT)
 

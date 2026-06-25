@@ -11,6 +11,7 @@ import { BoardRequestCard } from './BoardRequestCard';
 import { SubmissionDetailView } from './SubmissionDetailView';
 import { ReviseSubmissionView } from './ReviseSubmissionView';
 import { WithdrawDialog } from './shared/WithdrawDialog';
+import { RerouteDialog } from './shared/RerouteDialog';
 import { MyRequests } from '../hooks/useMyRequests';
 
 interface MyRequestsPanelProps {
@@ -29,6 +30,7 @@ export function MyRequestsPanel({
     filter, setFilter, pendingCount, approvedCount, rejectedCount, filteredSubmissions,
     openRequest, openSubmission, revisingBatchId, cancelRevising, startRevising, resubmit,
     exportSubmission, withdrawingBatchId, requestWithdraw, cancelWithdraw, confirmWithdraw,
+    rerouteEnabled, reroutingBatchId, requestReroute, cancelReroute, confirmReroute,
   } = myRequests;
 
   return (
@@ -37,7 +39,6 @@ export function MyRequestsPanel({
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-gray-900">My Requests</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Track the status of the changes you submitted for approval</p>
           </div>
           <div className="flex items-center gap-4 text-sm text-gray-500 flex-shrink-0">
             <span><span className="font-semibold text-amber-600">{pendingCount}</span> pending</span>
@@ -69,6 +70,7 @@ export function MyRequestsPanel({
             readOnly
             onExport={openSubmission.status !== 'approved' ? () => exportSubmission(openSubmission) : undefined}
             onEdit={openSubmission.status === 'rejected' ? () => startRevising(openSubmission.batchId) : undefined}
+            onReroute={rerouteEnabled && openSubmission.status === 'pending' ? () => requestReroute(openSubmission.batchId) : undefined}
             onWithdraw={openSubmission.status === 'pending' ? () => requestWithdraw(openSubmission.batchId) : undefined}
           />
         )
@@ -114,6 +116,9 @@ export function MyRequestsPanel({
       )}
 
       <WithdrawDialog open={withdrawingBatchId !== null} onClose={cancelWithdraw} onConfirm={confirmWithdraw} />
+      {rerouteEnabled && (
+        <RerouteDialog open={reroutingBatchId !== null} onClose={cancelReroute} onConfirm={confirmReroute} />
+      )}
     </div>
   );
 }

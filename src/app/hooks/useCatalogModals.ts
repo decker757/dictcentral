@@ -6,6 +6,13 @@
 // read-only — EntityModal/DataItemModal's Edit/Delete affordances simply
 // never render (no onDeleteRequest, and onUpdate becomes a no-op).
 //
+// `mode` ('board' | 'dgo') tells CreateModal/EditModal/DeleteConfirmDialog
+// which extra, mutually-exclusive section to show: 'board' gets the
+// "Reroute to Another HOD" checkbox; 'dgo' gets the compulsory "Staff
+// Approver" picker (the one-stage peer-DGO pipeline — see useCatalog).
+// Irrelevant for HOD, which never passes mutation handlers and so never
+// opens those modals in the first place.
+//
 // Centralizing this here means BoardPortal, ApproverPortal, and HODPortal no
 // longer each hand-roll their own ModalState union + open/close boilerplate
 // — they call useCatalogModals() and render <CatalogRecordModals> (see
@@ -14,6 +21,7 @@
 import { useState } from 'react';
 import { SubjectArea, Entity, DataItem, ChangeRequest } from '../types';
 import { findEntityById } from '../lib/catalog';
+import { RequestOpts } from './useCatalog';
 
 export type CatalogModalState =
   | { type: 'entity'; entity: Entity; subjectArea: SubjectArea; readOnly?: boolean }
@@ -30,17 +38,18 @@ export type PendingDelete =
   | null;
 
 interface MutationHandlers {
-  onSubmitCreateEntity?: (subjectAreaId: string, entity: Entity) => void;
-  onSubmitCreateDataItem?: (entityId: string, dataItem: DataItem) => void;
-  onSubmitEditEntity?: (entityId: string, updates: Partial<Entity>) => void;
-  onSubmitEditDataItem?: (dataItemId: string, updates: Partial<DataItem>) => void;
-  onSubmitDeleteEntity?: (entityId: string) => void;
-  onSubmitDeleteDataItem?: (dataItemId: string) => void;
+  onSubmitCreateEntity?: (subjectAreaId: string, entity: Entity, opts?: RequestOpts) => void;
+  onSubmitCreateDataItem?: (entityId: string, dataItem: DataItem, opts?: RequestOpts) => void;
+  onSubmitEditEntity?: (entityId: string, updates: Partial<Entity>, opts?: RequestOpts) => void;
+  onSubmitEditDataItem?: (dataItemId: string, updates: Partial<DataItem>, opts?: RequestOpts) => void;
+  onSubmitDeleteEntity?: (entityId: string, opts?: RequestOpts) => void;
+  onSubmitDeleteDataItem?: (dataItemId: string, opts?: RequestOpts) => void;
 }
 
 /** Pass no mutation handlers for a read-only portal (HOD); pass all six for one that can
- * create/edit/delete (Board, DGO). */
-export function useCatalogModals(subjectAreas: SubjectArea[], mutations: MutationHandlers = {}) {
+ * create/edit/delete (Board, DGO) — and pass the matching `mode` so the right extra section
+ * (reroute vs staff-approver) shows up in the modals. */
+export function useCatalogModals(subjectAreas: SubjectArea[], mutations: MutationHandlers = {}, mode: 'board' | 'dgo' = 'board') {
   const [modal, setModal] = useState<CatalogModalState>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
 
@@ -63,20 +72,20 @@ export function useCatalogModals(subjectAreas: SubjectArea[], mutations: Mutatio
   const openCreateModal = () => setModal({ type: 'create' });
   const openEditModal = () => setModal({ type: 'edit' });
 
-  const handleCreateEntity = (subjectAreaId: string, entity: Entity) => {
-    mutations.onSubmitCreateEntity?.(subjectAreaId, entity);
+  const handleCreateEntity = (subjectAreaId: string, entity: Entity, opts?: RequestOpts) => {
+    mutations.onSubmitCreateEntity?.(subjectAreaId, entity, opts);
     closeModal();
   };
-  const handleCreateDataItem = (entityId: string, dataItem: DataItem) => {
-    mutations.onSubmitCreateDataItem?.(entityId, dataItem);
+  const handleCreateDataItem = (entityId: string, dataItem: DataItem, opts?: RequestOpts) => {
+    mutations.onSubmitCreateDataItem?.(entityId, dataItem, opts);
     closeModal();
   };
-  const handleEditEntity = (entityId: string, updates: Partial<Entity>) => {
-    mutations.onSubmitEditEntity?.(entityId, updates);
+  const handleEditEntity = (entityId: string, updates: Partial<Entity>, opts?: RequestOpts) => {
+    mutations.onSubmitEditEntity?.(entityId, updates, opts);
     closeModal();
   };
-  const handleEditDataItem = (dataItemId: string, updates: Partial<DataItem>) => {
-    mutations.onSubmitEditDataItem?.(dataItemId, updates);
+  const handleEditDataItem = (dataItemId: string, updates: Partial<DataItem>, opts?: RequestOpts) => {
+    mutations.onSubmitEditDataItem?.(dataItemId, updates, opts);
     closeModal();
   };
 
@@ -85,16 +94,16 @@ export function useCatalogModals(subjectAreas: SubjectArea[], mutations: Mutatio
   const requestDeleteDataItem = (dataItem: DataItem) =>
     setPendingDelete({ recordType: 'dataitem', id: dataItem.id, name: dataItem.name });
   const cancelDelete = () => setPendingDelete(null);
-  const confirmDelete = () => {
+  const confirmDelete = (opts?: RequestOpts) => {
     if (!pendingDelete) return;
-    if (pendingDelete.recordType === 'entity') mutations.onSubmitDeleteEntity?.(pendingDelete.id);
-    else mutations.onSubmitDeleteDataItem?.(pendingDelete.id);
+    if (pendingDelete.recordType === 'entity') mutations.onSubmitDeleteEntity?.(pendingDelete.id, opts);
+    else mutations.onSubmitDeleteDataItem?.(pendingDelete.id, opts);
     setPendingDelete(null);
     closeModal();
   };
 
   return {
-    modal, closeModal,
+    modal, closeModal, mode,
     openEntity, openDataItem, openEntityById, openAdvancedSearch, openRequestDetail,
     openCreateModal, openEditModal,
     handleCreateEntity, handleCreateDataItem, handleEditEntity, handleEditDataItem,

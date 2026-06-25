@@ -24,7 +24,7 @@ export default function App() {
     subjectAreas, requests,
     submitCreateEntity, submitCreateDataItem, submitEditEntity, submitEditDataItem,
     submitDeleteEntity, submitDeleteDataItem,
-    approveDgo, approveHod, reject, reviseAndResubmit, withdraw,
+    approveDgo, approveHod, reject, reviseAndResubmit, withdraw, rerouteToHod,
     itemComments, addItemComment, batchComments, addBatchComment,
   } = useCatalog();
 
@@ -38,14 +38,15 @@ export default function App() {
         <BoardPortal
           subjectAreas={subjectAreas}
           requests={requests}
-          onSubmitCreateEntity={(saId, e) => submitCreateEntity(saId, e, CURRENT_BOARD_MEMBER)}
-          onSubmitCreateDataItem={(eId, di) => submitCreateDataItem(eId, di, CURRENT_BOARD_MEMBER)}
-          onSubmitEditEntity={(eId, u) => submitEditEntity(eId, u, CURRENT_BOARD_MEMBER)}
-          onSubmitEditDataItem={(diId, u) => submitEditDataItem(diId, u, CURRENT_BOARD_MEMBER)}
-          onSubmitDeleteEntity={eId => submitDeleteEntity(eId, CURRENT_BOARD_MEMBER)}
-          onSubmitDeleteDataItem={diId => submitDeleteDataItem(diId, CURRENT_BOARD_MEMBER)}
+          onSubmitCreateEntity={(saId, e, opts) => submitCreateEntity(saId, e, CURRENT_BOARD_MEMBER, opts)}
+          onSubmitCreateDataItem={(eId, di, opts) => submitCreateDataItem(eId, di, CURRENT_BOARD_MEMBER, opts)}
+          onSubmitEditEntity={(eId, u, opts) => submitEditEntity(eId, u, CURRENT_BOARD_MEMBER, opts)}
+          onSubmitEditDataItem={(diId, u, opts) => submitEditDataItem(diId, u, CURRENT_BOARD_MEMBER, opts)}
+          onSubmitDeleteEntity={(eId, opts) => submitDeleteEntity(eId, CURRENT_BOARD_MEMBER, opts)}
+          onSubmitDeleteDataItem={(diId, opts) => submitDeleteDataItem(diId, CURRENT_BOARD_MEMBER, opts)}
           onReviseAndResubmit={reviseAndResubmit}
           onWithdraw={withdraw}
+          onReroute={(batchId, hodName, comment) => rerouteToHod(batchId, hodName, comment, CURRENT_BOARD_MEMBER)}
           onLeave={() => setRole('selection')}
           itemComments={itemComments}
           batchComments={batchComments}
@@ -62,12 +63,12 @@ export default function App() {
           onAddItemComment={(requestId, text) => addItemComment(requestId, text, CURRENT_DGO)}
           batchComments={batchComments}
           onAddBatchComment={(batchId, text) => addBatchComment(batchId, text, CURRENT_DGO)}
-          onSubmitCreateEntity={(saId, e) => submitCreateEntity(saId, e, CURRENT_DGO)}
-          onSubmitCreateDataItem={(eId, di) => submitCreateDataItem(eId, di, CURRENT_DGO)}
-          onSubmitEditEntity={(eId, u) => submitEditEntity(eId, u, CURRENT_DGO)}
-          onSubmitEditDataItem={(diId, u) => submitEditDataItem(diId, u, CURRENT_DGO)}
-          onSubmitDeleteEntity={eId => submitDeleteEntity(eId, CURRENT_DGO)}
-          onSubmitDeleteDataItem={diId => submitDeleteDataItem(diId, CURRENT_DGO)}
+          onSubmitCreateEntity={(saId, e, opts) => submitCreateEntity(saId, e, CURRENT_DGO, opts)}
+          onSubmitCreateDataItem={(eId, di, opts) => submitCreateDataItem(eId, di, CURRENT_DGO, opts)}
+          onSubmitEditEntity={(eId, u, opts) => submitEditEntity(eId, u, CURRENT_DGO, opts)}
+          onSubmitEditDataItem={(diId, u, opts) => submitEditDataItem(diId, u, CURRENT_DGO, opts)}
+          onSubmitDeleteEntity={(eId, opts) => submitDeleteEntity(eId, CURRENT_DGO, opts)}
+          onSubmitDeleteDataItem={(diId, opts) => submitDeleteDataItem(diId, CURRENT_DGO, opts)}
           onReviseAndResubmit={reviseAndResubmit}
           onWithdraw={withdraw}
         />

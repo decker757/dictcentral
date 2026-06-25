@@ -16,6 +16,7 @@ import { MyRequestsPanel } from './components/MyRequestsPanel';
 import { CatalogRecordModals } from './components/shared/CatalogRecordModals';
 import { useCatalogModals } from './hooks/useCatalogModals';
 import { useMyRequests } from './hooks/useMyRequests';
+import { RequestOpts } from './hooks/useCatalog';
 import { countEntities, countDataItems } from './lib/catalog';
 import { CURRENT_BOARD_MEMBER } from './lib/constants';
 
@@ -24,14 +25,15 @@ type BoardTab = 'catalog' | 'myRequests';
 interface BoardPortalProps {
   subjectAreas: SubjectArea[];
   requests: ChangeRequest[];
-  onSubmitCreateEntity: (subjectAreaId: string, entity: Entity) => void;
-  onSubmitCreateDataItem: (entityId: string, dataItem: DataItem) => void;
-  onSubmitEditEntity: (entityId: string, updates: Partial<Entity>) => void;
-  onSubmitEditDataItem: (dataItemId: string, updates: Partial<DataItem>) => void;
-  onSubmitDeleteEntity: (entityId: string) => void;
-  onSubmitDeleteDataItem: (dataItemId: string) => void;
+  onSubmitCreateEntity: (subjectAreaId: string, entity: Entity, opts?: RequestOpts) => void;
+  onSubmitCreateDataItem: (entityId: string, dataItem: DataItem, opts?: RequestOpts) => void;
+  onSubmitEditEntity: (entityId: string, updates: Partial<Entity>, opts?: RequestOpts) => void;
+  onSubmitEditDataItem: (dataItemId: string, updates: Partial<DataItem>, opts?: RequestOpts) => void;
+  onSubmitDeleteEntity: (entityId: string, opts?: RequestOpts) => void;
+  onSubmitDeleteDataItem: (dataItemId: string, opts?: RequestOpts) => void;
   onReviseAndResubmit: (batchId: string, drafts: Record<string, Partial<RecordAttributes>>) => void;
   onWithdraw: (batchId: string) => void;
+  onReroute: (batchId: string, hodName: string, comment: string) => void;
   onLeave: () => void;
   itemComments: Record<string, Comment[]>;
   batchComments: Record<string, Comment[]>;
@@ -41,18 +43,18 @@ export function BoardPortal({
   subjectAreas, requests,
   onSubmitCreateEntity, onSubmitCreateDataItem, onSubmitEditEntity, onSubmitEditDataItem,
   onSubmitDeleteEntity, onSubmitDeleteDataItem,
-  onReviseAndResubmit, onWithdraw, onLeave, itemComments, batchComments,
+  onReviseAndResubmit, onWithdraw, onReroute, onLeave, itemComments, batchComments,
 }: BoardPortalProps) {
   const [tab, setTab] = useState<BoardTab>('catalog');
 
   const modals = useCatalogModals(subjectAreas, {
     onSubmitCreateEntity, onSubmitCreateDataItem, onSubmitEditEntity, onSubmitEditDataItem,
     onSubmitDeleteEntity, onSubmitDeleteDataItem,
-  });
+  }, 'board');
 
   const myRequests = useMyRequests({
     requests, submittedBy: CURRENT_BOARD_MEMBER, itemComments, batchComments,
-    onReviseAndResubmit, onWithdraw,
+    onReviseAndResubmit, onWithdraw, onReroute,
   });
 
   const totalEntities = countEntities(subjectAreas);

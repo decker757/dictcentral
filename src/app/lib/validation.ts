@@ -1,17 +1,70 @@
-// Soft-warning validation — distinct from the HARD required-field validation
-// in fieldSchema.ts (REQUIRED_RECORD_FIELDS), which BLOCKS a board member's
-// submission/resubmission if Business Name / Technical Name / Classification
-// are empty. Soft warnings never block anything — they're advisory notes a
-// DGO can check via the "Validate Fields" button in SubmissionDetailView,
-// surfacing rows that passed hard validation but may still need a closer
-// look before being forwarded to an HOD.
+// Field validation for the Create/Edit forms (CreateModal/EditModal) AND for
+// the DGO's "Validate Fields" review-time check on an already-submitted
+// request (SubmissionDetailView/ValidateFieldsModal). Two distinct tiers:
+//
+// - HARD errors (`getHardErrors`/`FieldError`): compulsory fields must be
+//   filled in, and free-text fields must hold an "appropriate" value (a
+//   technical name shaped like an identifier, a record count that's
+//   actually a number, etc). These BLOCK submission outright — in
+//   CreateModal/EditModal, the submit button stays as "Validate Fields"
+//   until every hard error clears; see those files' `validated` state.
+// - SOFT warnings (`getSoftWarnings`, pre-existing): advisory only, never
+//   block anything — surfaced alongside hard errors in the create/edit
+//   forms, and on its own via the DGO's post-submission "Validate Fields"
+//   button.
 
 import { ChangeRequest, RecordAttributes } from '../types';
 import { isEmptyValue } from './format';
+import { REQUIRED_RECORD_FIELDS } from './fieldSchema';
 
 export interface SoftWarning {
   field: string;
   message: string;
+}
+
+export interface FieldError {
+  field: string;
+  message: string;
+}
+
+const REQUIRED_FIELD_LABELS: Record<string, string> = {
+  name: 'Business Name',
+  technicalName: 'Technical Name',
+  classification: 'Classification',
+};
+
+// Lowercase letters, digits, underscores, starting with a letter — the shape every
+// `technicalName` in the seed data already follows (see data/mockData.ts).
+const TECHNICAL_NAME_RE = /^[a-z][a-z0-9_]*$/;
+
+/** HARD validation — compulsory fields present, and the fields that have one hold an
+ * "appropriate" value. Blocks submission; see CreateModal/EditModal's `validated` state. */
+export function getHardErrors(record: Partial<RecordAttributes>, recordType: 'entity' | 'dataitem'): FieldError[] {
+  const errors: FieldError[] = [];
+
+  for (const field of REQUIRED_RECORD_FIELDS) {
+    if (isEmptyValue(record[field])) {
+      errors.push({ field, message: `${REQUIRED_FIELD_LABELS[field] ?? field} is required.` });
+    }
+  }
+
+  if (!isEmptyValue(record.technicalName) && !TECHNICAL_NAME_RE.test(record.technicalName as string)) {
+    errors.push({
+      field: 'technicalName',
+      message: 'Technical Name must start with a letter and contain only lowercase letters, numbers, and underscores (e.g. customer_id).',
+    });
+  }
+  if (recordType === 'entity' && !isEmptyValue(record.recordCount) && !/^\d+$/.test(String(record.recordCount).replace(/,/g, ''))) {
+    errors.push({ field: 'recordCount', message: 'Record Count must be a whole number.' });
+  }
+  if (recordType === 'dataitem' && !isEmptyValue(record.length) && !/^\d+(,\d+)?$/.test(String(record.length))) {
+    errors.push({ field: 'length', message: 'Length / Precision must be numeric (e.g. 50 or 10,2).' });
+  }
+  if (!isEmptyValue(record.qualityScore) && (Number(record.qualityScore) < 0 || Number(record.qualityScore) > 100)) {
+    errors.push({ field: 'qualityScore', message: 'Quality Score must be between 0 and 100.' });
+  }
+
+  return errors;
 }
 
 /** Soft-warning rules for one record's fields — advisory only, never blocking. */
@@ -42,6 +95,20 @@ export function getSoftWarnings(record: RecordAttributes, recordType: 'entity' |
   }
 
   return warnings;
+}
+
+export interface FormValidationResult {
+  errors: FieldError[];
+  warnings: SoftWarning[];
+  passed: boolean;
+}
+
+/** Combined hard+soft validation for a Create/Edit form's current field values. `passed` is
+ * true once there are zero hard errors — soft warnings are shown but never block. */
+export function validateRecordForm(record: Partial<RecordAttributes>, recordType: 'entity' | 'dataitem'): FormValidationResult {
+  const errors = getHardErrors(record, recordType);
+  const warnings = getSoftWarnings(record as RecordAttributes, recordType);
+  return { errors, warnings, passed: errors.length === 0 };
 }
 
 export interface RequestWarnings {
