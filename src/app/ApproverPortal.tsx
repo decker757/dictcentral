@@ -1,63 +1,37 @@
 // The DGO (Data Governance Officer) portal — STAGE 1 of the two-stage review
-// pipeline. A DGO has the exact same Catalog + Review Requests shape as the
-// old single "Approver" role, PLUS: they can submit their own create/edit/
-// delete requests from the catalog (self-approval prevention — see
-// visibleSubmissions below — keeps a DGO's own pending submission out of
-// their own review queue), a "My Requests" tab (mirrors the Board Member's,
-// since a DGO is also a requester for their own submissions — this is where
-// a DGO tracks/revises/withdraws what THEY submitted, separate from the
-// queue of requests they REVIEW), and a "Validate Fields" button in the
-// request detail view surfaces soft warnings before forwarding to an HOD.
-// Approving in Review Requests does NOT commit anything to the catalog — it
-// just forwards the request to the HOD stage (see useCatalog.approveDgo);
-// only an HOD's approval commits.
+// pipeline. Composition of the same shared pieces every portal uses
+// (PortalHeader/Footer, CatalogBrowser, CatalogRecordModals), PLUS the two
+// hooks BoardPortal also uses for its own tabs: useMyRequests (a DGO is a
+// requester too — self-approval prevention keeps their own pending
+// submission out of the queue below, tracked here instead) and
+// useReviewQueue (shared with HODPortal — see that hook for what it owns).
+// On top of those shared pieces, this file adds what's DGO-specific:
+// "Validate Fields" (soft-warning panel, lib/validation.ts) and the
+// "Approve & Forward to HOD" framing, since a DGO's approval here never
+// commits anything to the catalog by itself — only an HOD's approval does
+// (see useCatalog.approveDgo).
 
 import { useState, useMemo } from 'react';
-import { BookOpen, GitBranch, LayoutList, LogOut, Bell, Check, Search, Play, Plus, Edit2, ClipboardList } from 'lucide-react';
+import { Plus, Edit2, LogOut, ClipboardList, Bell } from 'lucide-react';
 import { SubjectArea, Entity, DataItem, ChangeRequest, Comment, RecordAttributes } from './types';
-import { TreeView } from './components/TreeView';
-import { TableView } from './components/TableView';
-import { SearchBar } from './components/SearchBar';
-import { EntityModal } from './components/modals/EntityModal';
-import { DataItemModal } from './components/modals/DataItemModal';
-import { AdvancedSearchModal } from './components/modals/AdvancedSearchModal';
-import { CreateModal } from './components/modals/CreateModal';
-import { EditModal } from './components/modals/EditModal';
-import { ValidateFieldsModal } from './components/modals/ValidateFieldsModal';
-import { SubmissionCard } from './components/SubmissionCard';
-import { BoardRequestCard } from './components/BoardRequestCard';
+import { PortalHeader, PortalHeaderTab } from './components/PortalHeader';
+import { PortalFooter } from './components/PortalFooter';
+import { CatalogBrowser } from './components/CatalogBrowser';
+import { MyRequestsPanel } from './components/MyRequestsPanel';
+import { ReviewQueueList } from './components/ReviewQueueList';
+import { ReviewQueueBulkBar } from './components/ReviewQueueBulkBar';
+import { CatalogRecordModals } from './components/shared/CatalogRecordModals';
 import { SubmissionDetailView } from './components/SubmissionDetailView';
-import { ReviseSubmissionView } from './components/ReviseSubmissionView';
 import { FocusModeView } from './components/FocusModeView';
-import { RequestDetailModal } from './components/modals/RequestDetailModal';
+import { ValidateFieldsModal } from './components/modals/ValidateFieldsModal';
 import { RejectDialog } from './components/shared/RejectDialog';
-import { DeleteConfirmDialog } from './components/shared/DeleteConfirmDialog';
-import { WithdrawDialog } from './components/shared/WithdrawDialog';
-import { countDataItems, countMatches, findEntityById } from './lib/catalog';
+import { useCatalogModals } from './hooks/useCatalogModals';
+import { useMyRequests } from './hooks/useMyRequests';
+import { useReviewQueue } from './hooks/useReviewQueue';
 import { CURRENT_DGO } from './lib/constants';
-import { TypeLegend } from './lib/badges';
 import { groupRequestsByBatch, Submission } from './lib/submissions';
-import { buildSubmissionCsv, downloadTextFile } from './lib/exportCsv';
-import { ApproveButton, RejectButton } from './components/ui/ActionButton';
-import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 
 type Tab = 'home' | 'myRequests' | 'requests';
-type HomeView = 'tree' | 'table';
-type MyRequestFilter = 'all' | 'pending' | 'approved' | 'rejected';
-
-type ModalState =
-  | { type: 'entity'; entity: Entity; subjectArea: SubjectArea; readOnly?: boolean }
-  | { type: 'dataItem'; dataItem: DataItem; entity: Entity; subjectArea: SubjectArea; readOnly?: boolean }
-  | { type: 'advancedSearch' }
-  | { type: 'create' }
-  | { type: 'edit' }
-  | { type: 'requestDetail'; request: ChangeRequest }
-  | null;
-
-type PendingDelete =
-  | { recordType: 'entity'; id: string; name: string; childCount: number }
-  | { recordType: 'dataitem'; id: string; name: string }
-  | null;
 
 interface ApproverPortalProps {
   subjectAreas: SubjectArea[];
@@ -86,69 +60,17 @@ export function ApproverPortal({
   onSubmitDeleteEntity, onSubmitDeleteDataItem, onReviseAndResubmit, onWithdraw,
 }: ApproverPortalProps) {
   const [tab, setTab] = useState<Tab>('home');
-  const [homeView, setHomeView] = useState<HomeView>('tree');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [modal, setModal] = useState<ModalState>(null);
-  const [reqFilter, setReqFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
   const [validatingBatchId, setValidatingBatchId] = useState<string | null>(null);
 
-  // Review Requests tab: list of requests (one card per batch) → click into
-  // one for the full Excel-style table. Only ONE request is open at a time.
-  const [openBatchId, setOpenBatchId] = useState<string | null>(null);
+  const modals = useCatalogModals(subjectAreas, {
+    onSubmitCreateEntity, onSubmitCreateDataItem, onSubmitEditEntity, onSubmitEditDataItem,
+    onSubmitDeleteEntity, onSubmitDeleteDataItem,
+  });
 
-  // Unsent drafts for the OPEN request's comments — one commit point
-  // (Approve/Reject), not a per-comment submit button. Cleared whenever a
-  // different request is opened/closed so drafts never leak between requests.
-  const [openItemDrafts, setOpenItemDrafts] = useState<Record<string, string>>({});
-  const [openGenericDraft, setOpenGenericDraft] = useState('');
-
-  const openSubmissionView = (batchId: string | null) => {
-    setOpenBatchId(batchId);
-    setOpenItemDrafts({});
-    setOpenGenericDraft('');
-  };
-
-  const flushOpenDrafts = (batchId: string) => {
-    Object.entries(openItemDrafts).forEach(([requestId, text]) => {
-      if (text.trim()) onAddItemComment(requestId, text);
-    });
-    if (openGenericDraft.trim()) onAddBatchComment(batchId, openGenericDraft);
-    setOpenItemDrafts({});
-    setOpenGenericDraft('');
-  };
-
-  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
-
-  // List controls
-  const [listSearch, setListSearch] = useState('');
-  const [listTypeFilter, setListTypeFilter] = useState<'all' | 'create' | 'edit' | 'delete'>('all');
-  const [listSaFilter, setListSaFilter] = useState('');
-
-  // Focus mode
-  const [focusMode, setFocusMode] = useState(false);
-  const [focusQueueIds, setFocusQueueIds] = useState<string[]>([]);
-
-  // Reject dialog state — which batchIds are being rejected (reason lives in RejectDialog)
-  const [rejectingBatchIds, setRejectingBatchIds] = useState<string[] | null>(null);
-
-  // ── My Requests tab: the DGO's OWN submissions (created/edited/deleted
-  // from the catalog, just like a board member would) — separate state from
-  // the review queue above. Only ONE request open at a time here too.
-  const [myReqFilter, setMyReqFilter] = useState<MyRequestFilter>('all');
-  const [myOpenBatchId, setMyOpenBatchId] = useState<string | null>(null);
-  const [myRevisingBatchId, setMyRevisingBatchId] = useState<string | null>(null);
-  const [myWithdrawingBatchId, setMyWithdrawingBatchId] = useState<string | null>(null);
-
-  const myRequests = useMemo(() => requests.filter(r => r.submittedBy === CURRENT_DGO), [requests]);
-  const myAllSubmissions = useMemo(() => groupRequestsByBatch(myRequests), [myRequests]);
-  const myPendingCount = myAllSubmissions.filter(s => s.status === 'pending').length;
-  const myApprovedCount = myAllSubmissions.filter(s => s.status === 'approved').length;
-  const myRejectedCount = myAllSubmissions.filter(s => s.status === 'rejected').length;
-  const myFilteredSubmissions = useMemo(
-    () => myReqFilter === 'all' ? myAllSubmissions : myAllSubmissions.filter(s => s.status === myReqFilter),
-    [myAllSubmissions, myReqFilter],
-  );
+  const myRequests = useMyRequests({
+    requests, submittedBy: CURRENT_DGO, itemComments, batchComments,
+    onReviseAndResubmit, onWithdraw,
+  });
 
   const allSubmissions = useMemo(() => groupRequestsByBatch(requests), [requests]);
 
@@ -156,452 +78,104 @@ export function ApproverPortal({
   // A DGO can submit their own create/edit/delete requests from the catalog,
   // but must never see (let alone act on) their own request while it's
   // sitting at the DGO stage — it's routed to "another DGO" instead (and
-  // tracked, meanwhile, in the My Requests tab instead of this queue). Once
-  // a DGO's own request has moved past the DGO stage (or resolved), there's
-  // no self-approval risk left, so it's fine to keep it visible here too.
+  // tracked, meanwhile, in the My Requests tab above). Once a DGO's own
+  // request has moved past the DGO stage (or resolved), there's no
+  // self-approval risk left, so it's fine to keep it visible here too.
   const visibleSubmissions = useMemo(
     () => allSubmissions.filter(s => !(s.submittedBy === CURRENT_DGO && s.stage === 'dgo' && s.status === 'pending')),
     [allSubmissions],
   );
-
   const pendingSubmissions = visibleSubmissions.filter(s => s.status === 'pending' && s.stage === 'dgo');
   // "Approved" here means "approved BY ME" — forwarded to HOD (or since fully
   // resolved by HOD) — not just any submission with status 'approved'.
   const approvedSubmissions = visibleSubmissions.filter(s => s.dgoReviewedBy === CURRENT_DGO);
   const rejectedSubmissions = visibleSubmissions.filter(s => s.status === 'rejected');
 
-  const displaySubmissions = useMemo(() => {
-    if (reqFilter === 'approved') return approvedSubmissions;
-    if (reqFilter === 'rejected') return rejectedSubmissions;
-    return pendingSubmissions;
-  }, [reqFilter, pendingSubmissions, approvedSubmissions, rejectedSubmissions]);
+  const reviewQueue = useReviewQueue({
+    requests, pendingSubmissions, approvedSubmissions, rejectedSubmissions,
+    onApprove: onApproveDgo, onReject, onAddItemComment, onAddBatchComment,
+  });
 
-  // Apply list search + type + subject-area filters (a submission matches if
-  // ANY of its items match — the filters narrow down WHICH requests to show,
-  // not which rows inside a request).
-  const filteredSubmissions = useMemo(() => {
-    const term = listSearch.toLowerCase().trim();
-    return displaySubmissions.filter(s => {
-      if (term) {
-        const nameMatch = s.items.some(r => (r.proposedData as Entity | DataItem).name.toLowerCase().includes(term));
-        const byMatch = s.submittedBy.toLowerCase().includes(term);
-        if (!nameMatch && !byMatch) return false;
-      }
-      if (listTypeFilter !== 'all' && !s.items.some(r => r.type === listTypeFilter)) return false;
-      if (listSaFilter && !s.subjectAreaNames.includes(listSaFilter)) return false;
-      return true;
-    });
-  }, [displaySubmissions, listSearch, listTypeFilter, listSaFilter]);
-
-  const subjectAreaNames = useMemo(
-    () => Array.from(new Set(requests.map(r => r.subjectAreaName))),
-    [requests]
-  );
-
-  const totalDataItems = countDataItems(subjectAreas);
-  const treeMatchCount = useMemo(() => countMatches(subjectAreas, searchQuery), [subjectAreas, searchQuery]);
-
-  const openEntity = (entity: Entity, subjectArea: SubjectArea) =>
-    setModal({ type: 'entity', entity, subjectArea });
-  const openDataItem = (dataItem: DataItem, entity: Entity, subjectArea: SubjectArea) =>
-    setModal({ type: 'dataItem', dataItem, entity, subjectArea });
-  /** The hierarchy table's "unchanged entity" context row only has the Entity, not its SubjectArea — resolve it. */
-  const handleHierarchyEntityClick = (entity: Entity) => {
-    const found = findEntityById(subjectAreas, entity.id);
-    if (found) openEntity(found.entity, found.subjectArea);
-  };
-  /** My Requests' table only has the Entity for an unchanged-entity context row — resolve its
-   * SubjectArea and open read-only (this is a history view, not an edit entry point). */
-  const handleMyHierarchyEntityClick = (entity: Entity) => {
-    const found = findEntityById(subjectAreas, entity.id);
-    if (found) setModal({ type: 'entity', entity: found.entity, subjectArea: found.subjectArea, readOnly: true });
-  };
-  /** A row that IS a request (create/edit/delete) opens the diff-highlighted detail modal. */
-  const openRequestDetail = (request: ChangeRequest) => setModal({ type: 'requestDetail', request });
-
-  // ── Catalog mutations — these all submit REQUESTS, never write directly ──
-  const handleCreateEntity = (saId: string, entity: Entity) => { onSubmitCreateEntity(saId, entity); setModal(null); };
-  const handleCreateDataItem = (entityId: string, di: DataItem) => { onSubmitCreateDataItem(entityId, di); setModal(null); };
-  const handleEditEntity = (entityId: string, updates: Partial<Entity>) => { onSubmitEditEntity(entityId, updates); setModal(null); };
-  const handleEditDataItem = (diId: string, updates: Partial<DataItem>) => { onSubmitEditDataItem(diId, updates); setModal(null); };
-
-  const requestDeleteEntity = (entity: Entity) =>
-    setPendingDelete({ recordType: 'entity', id: entity.id, name: entity.name, childCount: entity.dataItems.length });
-  const requestDeleteDataItem = (dataItem: DataItem) =>
-    setPendingDelete({ recordType: 'dataitem', id: dataItem.id, name: dataItem.name });
-  const confirmDelete = () => {
-    if (!pendingDelete) return;
-    if (pendingDelete.recordType === 'entity') onSubmitDeleteEntity(pendingDelete.id);
-    else onSubmitDeleteDataItem(pendingDelete.id);
-    setPendingDelete(null);
-    setModal(null);
-  };
-
-  // ── Cross-request dependency guard ──────────────────────────────
-  // A request can contain a data-item create whose parent entity is itself a
-  // pending create — but in a DIFFERENT request. That other request must be
-  // approved first (the entity has to exist before its column can attach).
-  const isBatchBlocked = (batchId: string) => {
-    const items = requests.filter(r => r.batchId === batchId);
-    return items.some(req => {
-      if (!(req.type === 'create' && req.recordType === 'dataitem')) return false;
-      return requests.some(r =>
-        r.batchId !== batchId &&
-        r.type === 'create' && r.recordType === 'entity' && r.status === 'pending' &&
-        r.proposedData.id === req.parentEntityId
-      );
-    });
-  };
-
-  // Flat, in-order list of pending batch ids for Focus Mode
-  const orderedPendingBatchIds = useMemo(() => pendingSubmissions.map(s => s.batchId), [pendingSubmissions]);
-
-  // ── Selections (respect active filters) ───────────────────────
-
-  const allDisplayPendingBatchIds = filteredSubmissions.filter(s => s.status === 'pending').map(s => s.batchId);
-  const allSelected = allDisplayPendingBatchIds.length > 0 && allDisplayPendingBatchIds.every(id => selectedBatchIds.has(id));
-
-  const toggleSelectAll = () => {
-    if (allSelected) setSelectedBatchIds(new Set());
-    else setSelectedBatchIds(new Set(allDisplayPendingBatchIds));
-  };
-
-  const toggleSelect = (batchId: string) => {
-    const next = new Set(selectedBatchIds);
-    if (next.has(batchId)) next.delete(batchId);
-    else next.add(batchId);
-    setSelectedBatchIds(next);
-  };
-
-  // ── Approvals & Rejections (always whole-request) ──────────────
-
-  const handleApprove = (batchId: string) => {
-    onApproveDgo(batchId);
-    setSelectedBatchIds(prev => { const n = new Set(prev); n.delete(batchId); return n; });
-    if (openBatchId === batchId) openSubmissionView(null);
-  };
-
-  /** Approve from the open detail view: flush its drafts first (one commit point). */
-  const handleApproveOpen = (batchId: string) => {
-    flushOpenDrafts(batchId);
-    handleApprove(batchId);
-  };
-
-  const handleBulkApprove = () => {
-    const ids = Array.from(selectedBatchIds);
-    // Approve requests that don't depend on another pending request first.
-    const ordered = [...ids].sort((a, b) => (isBatchBlocked(a) ? 1 : 0) - (isBatchBlocked(b) ? 1 : 0));
-    for (const id of ordered) {
-      if (isBatchBlocked(id)) continue; // still blocked even after earlier approvals in this batch
-      onApproveDgo(id);
-    }
-    setSelectedBatchIds(new Set());
-  };
-
-  const handleOpenRejectDialog = (batchIds: string[]) => setRejectingBatchIds(batchIds);
-
-  /** Reject from the open detail view: flush its drafts first (one commit point), then open the dialog. */
-  const handleRejectOpen = (batchId: string) => {
-    flushOpenDrafts(batchId);
-    handleOpenRejectDialog([batchId]);
-  };
-
-  const confirmReject = (reason: string) => {
-    if (!rejectingBatchIds) return;
-    rejectingBatchIds.forEach(id => onReject(id, reason));
-    setRejectingBatchIds(null);
-    setSelectedBatchIds(new Set());
-    if (rejectingBatchIds.includes(openBatchId ?? '')) openSubmissionView(null);
-  };
-
-  // ── Focus mode ────────────────────────────────────────────────
-
-  const enterFocusMode = () => {
-    if (orderedPendingBatchIds.length === 0) return;
-    setFocusQueueIds(orderedPendingBatchIds);
-    setFocusMode(true);
-  };
-
-  const openSubmission: Submission | undefined = openBatchId
-    ? allSubmissions.find(s => s.batchId === openBatchId)
+  const openSubmission: Submission | undefined = reviewQueue.openBatchId
+    ? allSubmissions.find(s => s.batchId === reviewQueue.openBatchId)
     : undefined;
-
   const validatingSubmission: Submission | undefined = validatingBatchId
     ? allSubmissions.find(s => s.batchId === validatingBatchId)
     : undefined;
 
-  // ── My Requests navigation/actions ──────────────────────────────
-  /** Open one of MY requests: always lands on the read-only detail view, never mid-revise. */
-  const openMyRequest = (batchId: string | null) => { setMyOpenBatchId(batchId); setMyRevisingBatchId(null); };
-  const myOpenSubmission: Submission | undefined = myOpenBatchId
-    ? myAllSubmissions.find(s => s.batchId === myOpenBatchId)
-    : undefined;
-
-  const handleExportSubmission = (submission: Submission) => {
-    const csv = buildSubmissionCsv(submission.items, itemComments, batchComments[submission.batchId] ?? []);
-    downloadTextFile(`request-${submission.batchId}.csv`, csv);
-  };
-
-  const handleResubmit = (batchId: string, drafts: Record<string, Partial<RecordAttributes>>) => {
-    onReviseAndResubmit(batchId, drafts);
-    setMyRevisingBatchId(null);
-    setMyOpenBatchId(null);
-    setMyReqFilter('pending');
-  };
-
-  /** Opens the withdraw confirmation dialog for one of MY pending requests. */
-  const requestMyWithdraw = (batchId: string) => setMyWithdrawingBatchId(batchId);
-  const confirmMyWithdraw = () => {
-    if (!myWithdrawingBatchId) return;
-    onWithdraw(myWithdrawingBatchId);
-    if (myOpenBatchId === myWithdrawingBatchId) openMyRequest(null);
-    setMyWithdrawingBatchId(null);
-  };
-
   const switchTab = (next: Tab) => {
     setTab(next);
-    openSubmissionView(null);
-    openMyRequest(null);
-    setFocusMode(false);
+    reviewQueue.openDetail(null);
+    myRequests.openRequest(null);
+    reviewQueue.exitFocusMode();
   };
+
+  const tabs: PortalHeaderTab<Tab>[] = [
+    { key: 'home', label: 'Catalog' },
+    {
+      key: 'myRequests', label: 'My Requests', icon: <ClipboardList className="w-3.5 h-3.5" />,
+      badge: { count: myRequests.pendingCount, variant: 'inline' },
+    },
+    {
+      key: 'requests', label: 'Review Requests', icon: <Bell className="w-3.5 h-3.5" />,
+      badge: { count: pendingSubmissions.length, variant: 'corner' },
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col relative pb-20">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-[1600px] mx-auto px-6">
-          <div className="flex items-center justify-between h-14 gap-4">
-            {/* Brand */}
-            <div className="flex items-center gap-2.5 flex-shrink-0">
-              <div className="p-1.5 bg-blue-600 rounded-lg">
-                <BookOpen className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-lg font-bold text-gray-900 tracking-tight">DictCentral</span>
-              </div>
-            </div>
+      <PortalHeader
+        activeTab={tab}
+        onTabChange={switchTab}
+        tabs={tabs}
+        actions={
+          <>
+            <button
+              onClick={modals.openEditModal}
+              className="flex items-center gap-1.5 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 border border-gray-200 transition-colors shadow-sm"
+            >
+              <Edit2 className="w-4 h-4 text-orange-500" /> Edit
+            </button>
+            <button
+              onClick={modals.openCreateModal}
+              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              <Plus className="w-4 h-4" /> Create
+            </button>
+            <button
+              onClick={onLeave}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <LogOut className="w-4 h-4" /> Leave
+            </button>
+          </>
+        }
+      />
 
-            {/* Main tabs */}
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
-              <button
-                onClick={() => switchTab('home')}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  tab === 'home' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Catalog
-              </button>
-              <button
-                onClick={() => switchTab('myRequests')}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors relative ${
-                  tab === 'myRequests' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <ClipboardList className="w-3.5 h-3.5" /> My Requests
-                {myPendingCount > 0 && (
-                  <span className="w-4 h-4 bg-amber-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{myPendingCount}</span>
-                )}
-              </button>
-              <button
-                onClick={() => switchTab('requests')}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors relative ${
-                  tab === 'requests' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <Bell className="w-3.5 h-3.5" />
-                Review Requests
-                {pendingSubmissions.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                    {pendingSubmissions.length}
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {/* Right */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setModal({ type: 'edit' })}
-                className="flex items-center gap-1.5 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 border border-gray-200 transition-colors shadow-sm"
-              >
-                <Edit2 className="w-4 h-4 text-orange-500" /> Edit
-              </button>
-              <button
-                onClick={() => setModal({ type: 'create' })}
-                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-              >
-                <Plus className="w-4 h-4" /> Create
-              </button>
-              <button
-                onClick={onLeave}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <LogOut className="w-4 h-4" /> Leave
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-6 py-5 flex flex-col gap-5">
         {tab === 'home' && (
-          <>
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              onAdvancedSearch={() => setModal({ type: 'advancedSearch' })}
-              resultCount={searchQuery.trim() ? treeMatchCount : undefined}
-              totalCount={totalDataItems}
-            />
-
-            <div className="-mb-2 flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-gray-700">
-                  {homeView === 'tree' ? 'Data Hierarchy' : 'All Data Items'}
-                </h2>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {homeView === 'tree'
-                    ? 'Click an Entity or Data Item to view, edit, or delete it'
-                    : 'Click any row to inspect, edit, or delete its full metadata'}
-                </p>
-              </div>
-              <div className="flex items-center gap-3 flex-shrink-0">
-                {homeView === 'tree' && <TypeLegend className="hidden lg:flex" />}
-                {/* Tree / Table toggle — inline with the section it controls */}
-                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setHomeView('tree')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      homeView === 'tree' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <GitBranch className="w-3.5 h-3.5" /> Tree
-                  </button>
-                  <button
-                    onClick={() => setHomeView('table')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      homeView === 'table' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <LayoutList className="w-3.5 h-3.5" /> Table
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {homeView === 'tree' && (
-              <TreeView
-                subjectAreas={subjectAreas}
-                searchQuery={searchQuery}
-                onEntityClick={openEntity}
-                onDataItemClick={openDataItem}
-              />
-            )}
-            {homeView === 'table' && (
-              <TableView
-                subjectAreas={subjectAreas}
-                searchQuery={searchQuery}
-                onDataItemClick={openDataItem}
-                onEntityClick={openEntity}
-              />
-            )}
-          </>
+          <CatalogBrowser
+            subjectAreas={subjectAreas}
+            onEntityClick={modals.openEntity}
+            onDataItemClick={modals.openDataItem}
+            onAdvancedSearch={modals.openAdvancedSearch}
+          />
         )}
 
         {tab === 'myRequests' && (
-          <div className="flex flex-col gap-5 pb-12">
-            {!myOpenSubmission && (
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-base font-semibold text-gray-900">My Requests</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">Track the status of the changes you submitted for approval</p>
-                </div>
-                <div className="flex items-center gap-4 text-sm text-gray-500 flex-shrink-0">
-                  <span><span className="font-semibold text-amber-600">{myPendingCount}</span> pending</span>
-                  <span><span className="font-semibold text-emerald-600">{myApprovedCount}</span> approved</span>
-                  <span><span className="font-semibold text-red-600">{myRejectedCount}</span> rejected</span>
-                </div>
-              </div>
-            )}
-
-            {myOpenSubmission ? (
-              myRevisingBatchId === myOpenSubmission.batchId ? (
-                <ReviseSubmissionView
-                  submission={myOpenSubmission}
-                  subjectAreas={subjectAreas}
-                  itemComments={itemComments}
-                  genericComments={batchComments[myOpenSubmission.batchId] ?? []}
-                  onBack={() => setMyRevisingBatchId(null)}
-                  onResubmit={drafts => handleResubmit(myOpenSubmission.batchId, drafts)}
-                />
-              ) : (
-                <SubmissionDetailView
-                  submission={myOpenSubmission}
-                  subjectAreas={subjectAreas}
-                  onBack={() => openMyRequest(null)}
-                  onEntityClick={handleMyHierarchyEntityClick}
-                  onRowClick={openRequestDetail}
-                  itemComments={itemComments}
-                  genericComments={batchComments[myOpenSubmission.batchId] ?? []}
-                  readOnly
-                  onExport={myOpenSubmission.status !== 'approved' ? () => handleExportSubmission(myOpenSubmission) : undefined}
-                  onEdit={myOpenSubmission.status === 'rejected' ? () => setMyRevisingBatchId(myOpenSubmission.batchId) : undefined}
-                  onWithdraw={myOpenSubmission.status === 'pending' ? () => requestMyWithdraw(myOpenSubmission.batchId) : undefined}
-                />
-              )
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
-                    <button
-                      key={f}
-                      onClick={() => setMyReqFilter(f)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
-                        myReqFilter === f
-                          ? 'bg-gray-900 text-white'
-                          : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
-                      }`}
-                    >
-                      {f}
-                      {f === 'pending' && myPendingCount > 0 && (
-                        <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">{myPendingCount}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-
-                {myFilteredSubmissions.length === 0 ? (
-                  <div className="text-center py-20 text-gray-400">
-                    <ClipboardList className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                    <div className="text-sm font-medium capitalize">{myReqFilter === 'all' ? 'No requests yet' : `No ${myReqFilter} requests`}</div>
-                    <div className="text-xs mt-1">
-                      {myReqFilter === 'pending'
-                        ? 'Nothing awaiting approval — use Create or Edit to submit a change'
-                        : myReqFilter === 'all'
-                          ? 'Use Create or Edit to submit your first change'
-                          : `You have no ${myReqFilter} requests yet`}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2.5">
-                    {myFilteredSubmissions.map(submission => (
-                      <BoardRequestCard
-                        key={submission.batchId}
-                        submission={submission}
-                        onOpen={() => openMyRequest(submission.batchId)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          <MyRequestsPanel
+            subjectAreas={subjectAreas}
+            myRequests={myRequests}
+            itemComments={itemComments}
+            batchComments={batchComments}
+            onEntityClick={entity => modals.openEntityById(entity, true)}
+            onRowClick={modals.openRequestDetail}
+          />
         )}
 
         {tab === 'requests' && (
           <div className="flex flex-col gap-5 pb-12">
-            {!openBatchId && !focusMode && (
+            {!openSubmission && !reviewQueue.focusMode && (
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-base font-semibold text-gray-900">Review Requests</h2>
@@ -617,272 +191,75 @@ export function ApproverPortal({
               </div>
             )}
 
-            {focusMode ? (
+            {reviewQueue.focusMode ? (
               <FocusModeView
-                queueIds={focusQueueIds}
+                queueIds={reviewQueue.focusQueueIds}
                 requests={requests}
                 subjectAreas={subjectAreas}
-                onApprove={handleApprove}
+                onApprove={reviewQueue.handleApprove}
                 onReject={onReject}
-                onExit={() => setFocusMode(false)}
-                onEntityClick={handleHierarchyEntityClick}
-                onRowClick={openRequestDetail}
+                onExit={reviewQueue.exitFocusMode}
+                onEntityClick={modals.openEntityById}
+                onRowClick={modals.openRequestDetail}
                 itemComments={itemComments}
                 onAddItemComment={onAddItemComment}
                 batchComments={batchComments}
                 onAddBatchComment={onAddBatchComment}
-                isBatchBlocked={isBatchBlocked}
+                isBatchBlocked={reviewQueue.isBatchBlocked}
                 approveLabel="Approve & Forward to HOD"
               />
             ) : openSubmission ? (
               <SubmissionDetailView
                 submission={openSubmission}
                 subjectAreas={subjectAreas}
-                onBack={() => openSubmissionView(null)}
-                onApprove={() => handleApproveOpen(openSubmission.batchId)}
-                onReject={() => handleRejectOpen(openSubmission.batchId)}
+                onBack={() => reviewQueue.openDetail(null)}
+                onApprove={() => reviewQueue.handleApproveOpen(openSubmission.batchId)}
+                onReject={() => reviewQueue.handleRejectOpen(openSubmission.batchId)}
                 onValidate={() => setValidatingBatchId(openSubmission.batchId)}
                 approveLabel="Approve & Forward to HOD"
-                onEntityClick={handleHierarchyEntityClick}
-                onRowClick={openRequestDetail}
+                onEntityClick={modals.openEntityById}
+                onRowClick={modals.openRequestDetail}
                 itemComments={itemComments}
                 genericComments={batchComments[openSubmission.batchId] ?? []}
-                itemDrafts={openItemDrafts}
-                onItemDraftChange={(requestId, text) => setOpenItemDrafts(prev => ({ ...prev, [requestId]: text }))}
-                genericDraft={openGenericDraft}
-                onGenericDraftChange={setOpenGenericDraft}
-                blocked={isBatchBlocked(openSubmission.batchId)}
+                itemDrafts={reviewQueue.openItemDrafts}
+                onItemDraftChange={(requestId, text) => reviewQueue.setOpenItemDrafts(prev => ({ ...prev, [requestId]: text }))}
+                genericDraft={reviewQueue.openGenericDraft}
+                onGenericDraftChange={reviewQueue.setOpenGenericDraft}
+                blocked={reviewQueue.isBatchBlocked(openSubmission.batchId)}
               />
             ) : (
-              <>
-                {/* Filter pills + Review button */}
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    {(['pending', 'approved', 'rejected'] as const).map(f => (
-                      <button
-                        key={f}
-                        onClick={() => setReqFilter(f)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
-                          reqFilter === f
-                            ? 'bg-gray-900 text-white'
-                            : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
-                        }`}
-                      >
-                        {f}
-                        {f === 'pending' && pendingSubmissions.length > 0 && (
-                          <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
-                            {pendingSubmissions.length}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={enterFocusMode}
-                    disabled={orderedPendingBatchIds.length === 0}
-                    className="inline-flex items-center justify-center gap-2 h-9 px-4 bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-                  >
-                    <Play className="w-4 h-4" /> Review Pending
-                  </button>
-                </div>
-
-                {/* Search + type + subject-area filters + select all */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="relative flex-1 min-w-[220px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                    <input
-                      value={listSearch}
-                      onChange={e => setListSearch(e.target.value)}
-                      placeholder="Search requests by requester or record name…"
-                      className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-400"
-                    />
-                  </div>
-                  <select
-                    value={listTypeFilter}
-                    onChange={e => setListTypeFilter(e.target.value as 'all' | 'create' | 'edit' | 'delete')}
-                    className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white outline-none focus:ring-2 focus:ring-blue-400 text-gray-700"
-                  >
-                    <option value="all">All types</option>
-                    <option value="create">Create</option>
-                    <option value="edit">Edit</option>
-                    <option value="delete">Delete</option>
-                  </select>
-                  <select
-                    value={listSaFilter}
-                    onChange={e => setListSaFilter(e.target.value)}
-                    className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white outline-none focus:ring-2 focus:ring-blue-400 text-gray-700"
-                  >
-                    <option value="">All subject areas</option>
-                    {subjectAreaNames.map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-
-                  {allDisplayPendingBatchIds.length > 0 && (
-                    <div className="flex items-center gap-2 ml-auto">
-                      <CheckboxPrimitive.Root
-                        id="select-all-pending"
-                        checked={allSelected}
-                        onCheckedChange={toggleSelectAll}
-                        className="w-4 h-4 rounded border border-gray-300 bg-white flex items-center justify-center data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                      >
-                        <CheckboxPrimitive.Indicator>
-                          <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                        </CheckboxPrimitive.Indicator>
-                      </CheckboxPrimitive.Root>
-                      <label htmlFor="select-all-pending" className="text-sm font-medium text-gray-700 cursor-pointer whitespace-nowrap">
-                        Select all {allDisplayPendingBatchIds.length} pending
-                      </label>
-                    </div>
-                  )}
-                </div>
-
-                {filteredSubmissions.length === 0 && (
-                  <div className="text-center py-20 text-gray-400">
-                    <Bell className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                    <div className="text-sm font-medium">No matching requests</div>
-                    <div className="text-xs mt-1">
-                      {reqFilter === 'pending'
-                        ? 'All caught up — no pending requests to review'
-                        : 'Try adjusting your search or filters'}
-                    </div>
-                  </div>
-                )}
-
-                {/* One RequestCard per request (= per batch) — click to open the full table */}
-                <div className="flex flex-col gap-2.5">
-                  {filteredSubmissions.map(submission => (
-                    <SubmissionCard
-                      key={submission.batchId}
-                      submission={submission}
-                      onOpen={() => openSubmissionView(submission.batchId)}
-                      selected={selectedBatchIds.has(submission.batchId)}
-                      onToggleSelect={() => toggleSelect(submission.batchId)}
-                    />
-                  ))}
-                </div>
-              </>
+              <ReviewQueueList
+                queue={reviewQueue}
+                pendingCount={pendingSubmissions.length}
+                searchPlaceholder="Search requests by requester or record name…"
+              />
             )}
           </div>
         )}
       </main>
 
-      {/* Sticky Bottom Action Bar */}
-      {selectedBatchIds.size > 0 && tab === 'requests' && !focusMode && !openBatchId && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-50 animate-in slide-in-from-bottom-2">
-          <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between">
-            <div className="text-sm font-semibold text-gray-700">
-              {selectedBatchIds.size} selected request(s)
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setSelectedBatchIds(new Set())}
-                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                Clear
-              </button>
-              <RejectButton size="md" variant="solid" onClick={() => handleOpenRejectDialog(Array.from(selectedBatchIds))}>
-                Reject Selected
-              </RejectButton>
-              <ApproveButton size="md" onClick={handleBulkApprove}>
-                Approve Selected
-              </ApproveButton>
-            </div>
-          </div>
-        </div>
+      {reviewQueue.selectedBatchIds.size > 0 && tab === 'requests' && !reviewQueue.focusMode && !reviewQueue.openBatchId && (
+        <ReviewQueueBulkBar
+          count={reviewQueue.selectedBatchIds.size}
+          onClear={reviewQueue.clearSelection}
+          onRejectSelected={() => reviewQueue.openRejectDialog(Array.from(reviewQueue.selectedBatchIds))}
+          onApproveSelected={reviewQueue.handleBulkApprove}
+        />
       )}
 
-      {/* Reject Dialog */}
       <RejectDialog
-        open={rejectingBatchIds !== null}
-        count={rejectingBatchIds?.length ?? 1}
-        onClose={() => setRejectingBatchIds(null)}
-        onConfirm={confirmReject}
+        open={reviewQueue.rejectingBatchIds !== null}
+        count={reviewQueue.rejectingBatchIds?.length ?? 1}
+        onClose={reviewQueue.closeRejectDialog}
+        onConfirm={reviewQueue.confirmReject}
       />
 
-      {/* Delete confirmation — submits a delete REQUEST, doesn't delete directly */}
-      <DeleteConfirmDialog
-        open={pendingDelete !== null}
-        recordName={pendingDelete?.name}
-        recordType={pendingDelete?.recordType}
-        childCount={pendingDelete?.recordType === 'entity' ? pendingDelete.childCount : undefined}
-        onClose={() => setPendingDelete(null)}
-        onConfirm={confirmDelete}
-      />
+      <PortalFooter label="DGO Portal" />
 
-      {/* Withdraw confirmation — My Requests tab, pending requests only */}
-      <WithdrawDialog
-        open={myWithdrawingBatchId !== null}
-        onClose={() => setMyWithdrawingBatchId(null)}
-        onConfirm={confirmMyWithdraw}
-      />
+      <CatalogRecordModals subjectAreas={subjectAreas} modals={modals} />
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-100 mt-auto relative z-40">
-        <div className="max-w-[1600px] mx-auto px-6 py-3 text-xs text-gray-400">
-          <span>DictCentral · DGO Portal</span>
-        </div>
-      </footer>
-
-      {/* Modals */}
-      {modal?.type === 'entity' && (
-        <EntityModal
-          entity={modal.entity}
-          subjectArea={modal.subjectArea}
-          onClose={() => setModal(null)}
-          onDataItemClick={(di, e, sa) => setModal({ type: 'dataItem', dataItem: di, entity: e, subjectArea: sa, readOnly: modal.readOnly })}
-          onUpdate={modal.readOnly ? () => {} : handleEditEntity}
-          onDeleteRequest={modal.readOnly ? undefined : () => requestDeleteEntity(modal.entity)}
-          readOnly={modal.readOnly}
-        />
-      )}
-      {modal?.type === 'dataItem' && (
-        <DataItemModal
-          dataItem={modal.dataItem}
-          entity={modal.entity}
-          subjectArea={modal.subjectArea}
-          onClose={() => setModal(null)}
-          onEntityClick={(e, sa) => setModal({ type: 'entity', entity: e, subjectArea: sa, readOnly: modal.readOnly })}
-          onUpdate={modal.readOnly ? () => {} : handleEditDataItem}
-          onDeleteRequest={modal.readOnly ? undefined : () => requestDeleteDataItem(modal.dataItem)}
-          readOnly={modal.readOnly}
-        />
-      )}
-      {modal?.type === 'advancedSearch' && (
-        <AdvancedSearchModal
-          subjectAreas={subjectAreas}
-          onClose={() => setModal(null)}
-          onDataItemClick={(di, e, sa) => { setModal(null); setTimeout(() => openDataItem(di, e, sa), 50); }}
-          onEntityClick={(e, sa) => { setModal(null); setTimeout(() => openEntity(e, sa), 50); }}
-          initialFilters={searchQuery ? { businessName: searchQuery } : undefined}
-        />
-      )}
-      {modal?.type === 'create' && (
-        <CreateModal
-          subjectAreas={subjectAreas}
-          onClose={() => setModal(null)}
-          onCreateEntity={handleCreateEntity}
-          onCreateDataItem={handleCreateDataItem}
-        />
-      )}
-      {modal?.type === 'edit' && (
-        <EditModal
-          subjectAreas={subjectAreas}
-          onClose={() => setModal(null)}
-          onUpdateEntity={handleEditEntity}
-          onUpdateDataItem={handleEditDataItem}
-        />
-      )}
-      {modal?.type === 'requestDetail' && (
-        <RequestDetailModal
-          request={modal.request}
-          onClose={() => setModal(null)}
-        />
-      )}
       {validatingSubmission && (
-        <ValidateFieldsModal
-          items={validatingSubmission.items}
-          onClose={() => setValidatingBatchId(null)}
-        />
+        <ValidateFieldsModal items={validatingSubmission.items} onClose={() => setValidatingBatchId(null)} />
       )}
     </div>
   );

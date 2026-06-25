@@ -2,7 +2,7 @@
 // Previously each of these traversals was re-implemented inline across
 // App, ApproverPortal, TableView, AdvancedSearchModal, Create/EditModal.
 
-import { SubjectArea, Entity, DataItem } from '../types';
+import { SubjectArea, Entity, DataItem, ChangeRequest } from '../types';
 
 export interface FlatDataItem {
   dataItem: DataItem;
@@ -72,4 +72,23 @@ export const computeChangedFields = (
   keys.delete('id');
   keys.delete('dataItems');
   return [...keys].filter(k => JSON.stringify(original[k]) !== JSON.stringify(proposed[k]));
+};
+
+/**
+ * A pending request can be blocked on another, unrelated, pending request —
+ * specifically, a data-item CREATE whose parent entity is itself a pending
+ * entity CREATE in a DIFFERENT batch (the entity has to actually exist
+ * before its column can attach to it). Previously this exact predicate was
+ * duplicated verbatim in ApproverPortal and HODPortal; both now call this.
+ */
+export const isBatchBlocked = (requests: ChangeRequest[], batchId: string): boolean => {
+  const items = requests.filter(r => r.batchId === batchId);
+  return items.some(req => {
+    if (!(req.type === 'create' && req.recordType === 'dataitem')) return false;
+    return requests.some(r =>
+      r.batchId !== batchId &&
+      r.type === 'create' && r.recordType === 'entity' && r.status === 'pending' &&
+      r.proposedData.id === req.parentEntityId
+    );
+  });
 };

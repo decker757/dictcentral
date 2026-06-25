@@ -41,10 +41,10 @@ npm run typecheck  # tsc --noEmit (see gotcha below)
 
 `src/main.tsx` → `src/app/App.tsx` (default export). `App` is **routing + composition only**
 — it owns no UI of its own beyond picking which screen to render; the catalog/request state and
-every mutation live in the `useCatalog` hook, and each role's entire screen (header, tabs, modal
-state, the lot) is its own component that `App` just wires `useCatalog`'s state/actions into,
-binding each role's identity (CURRENT_BOARD_MEMBER / CURRENT_DGO / CURRENT_HOD, from
-lib/constants) so the portals themselves never have to know "which person am I":
+every mutation live in the `useCatalog` hook, and each role's entire screen is its own component
+that `App` just wires `useCatalog`'s state/actions into, binding each role's identity
+(CURRENT_BOARD_MEMBER / CURRENT_DGO / CURRENT_HOD, from lib/constants) so the portals themselves
+never have to know "which person am I":
 
 - `role === 'selection'` → `LandingPage` (pick Board Member, DGO, or HOD)
 - `role === 'board'`     → `BoardPortal`
@@ -57,6 +57,18 @@ explicit `submittedBy`) plus the two-stage review actions: `approveDgo` (forward
 nothing), `approveHod` (commits to the catalog), `reject` (works at either stage), `reviseAndResubmit`,
 `withdraw`. `App` just wires those into whichever portal is active.
 
+**Each portal file is now pure composition, not hand-rolled state.** The three portals share
+enough behavior (catalog modals, a "my requests" tab, a review queue) that re-implementing each
+from scratch would mean the same ~150 lines of state/JSX living in three places, silently
+drifting out of sync (see the header-reflow bug this exact pattern caused, noted in Conventions
+below). Instead, all of it lives in shared hooks (`hooks/useCatalogModals.ts`,
+`hooks/useMyRequests.ts`, `hooks/useReviewQueue.ts`) and shared presentational components
+(`components/PortalHeader.tsx`, `PortalFooter.tsx`, `CatalogBrowser.tsx`, `MyRequestsPanel.tsx`,
+`ReviewQueueList.tsx`, `ReviewQueueBulkBar.tsx`, `shared/CatalogRecordModals.tsx`) — a portal file
+just calls the hooks it needs and renders the matching components, adding only what's genuinely
+role-specific (DGO's Validate Fields button; HOD's read-only catalog and `disableItemComments`).
+See each new file's header comment for exactly what it owns and why.
+
 ### Key files
 ```
 src/app/
@@ -66,33 +78,52 @@ src/app/
                        of its own
   types.ts             DataItem · Entity · SubjectArea · ChangeRequest (batchId-grouped,
                        type create|edit|delete, stage dgo|hod) · Comment
-  BoardPortal.tsx      Board Member: Catalog (tree/table, editable via Create/Edit header
-                       buttons + per-record Edit/Delete in EntityModal/DataItemModal) +
-                       My Requests (list of BoardRequestCards → SubmissionDetailView, filtered
-                       All/Pending/Approved/Rejected). Owns its own header/tabs/modal state.
+  BoardPortal.tsx      Board Member: Catalog tab → <CatalogBrowser> wired to useCatalogModals
+                       (mutation handlers passed in → editable); My Requests tab →
+                       <MyRequestsPanel> wired to useMyRequests. Header stats (Areas/Entities/
+                       Data Items) are the only bit of UI left that's actually board-specific.
   ApproverPortal.tsx   The DGO portal (file name kept for history) — STAGE 1 review. THREE
-                       tabs: Catalog (tree/table, ALSO editable — a DGO can create/edit/delete
-                       too, routed to "another DGO" via self-approval-prevention filtering),
-                       My Requests (the DGO's own submissions — mirrors BoardPortal's My
-                       Requests, since a DGO is a requester too), and Review Requests (list of
-                       SubmissionCards → SubmissionDetailView w/ "Validate Fields" /
-                       FocusModeView; filters, bulk, focus). Approving in Review Requests
-                       forwards to HOD, doesn't commit.
-  HODPortal.tsx        The HOD portal — STAGE 2, FINAL review. Catalog is READ-ONLY (no
-                       create/edit/delete). Requests tab only ever shows submissions where a DGO
-                       has already approved (`dgoReviewedBy` set); SubmissionCards show
-                       `showDgoReviewer`; SubmissionDetailView/FocusModeView render with
-                       `disableItemComments` (no per-item commenting, generic comment still
-                       works) and no Validate button. Approving here commits to the catalog.
+                       tabs, same shared-component pattern as BoardPortal: Catalog
+                       (useCatalogModals, ALSO editable — a DGO can create/edit/delete too,
+                       routed to "another DGO" via self-approval-prevention filtering), My
+                       Requests (useMyRequests, identical to BoardPortal's — a DGO is a
+                       requester too), Review Requests (useReviewQueue + <ReviewQueueList> /
+                       <ReviewQueueBulkBar>, shared with HODPortal). DGO-specific additions on
+                       top: "Validate Fields" (ValidateFieldsModal) and the "Approve & Forward
+                       to HOD" framing — approving here never commits to the catalog.
+  HODPortal.tsx        The HOD portal — STAGE 2, FINAL review. Catalog tab → <CatalogBrowser
+                       readOnly> wired to a mutation-less useCatalogModals (every open call
+                       forces `readOnly: true` explicitly — the hook itself doesn't infer it).
+                       Requests tab → useReviewQueue scoped to submissions where a DGO has
+                       already approved (`dgoReviewedBy` set); <ReviewQueueList
+                       showDgoReviewer>; SubmissionDetailView/FocusModeView render with
+                       `disableItemComments` and no Validate button. Approving here commits to
+                       the catalog.
   LandingPage.tsx      Role picker (Board Member / DGO / HOD)
   hooks/
-    useCatalog.ts      The engine: state + commit/submit (create/edit/**delete**, each taking an
+    useCatalog.ts      The ENGINE: state + commit/submit (create/edit/**delete**, each taking an
                        explicit submittedBy) + approveDgo(batchId,name)/approveHod(batchId,name)/
                        reject(batchId,reason,name)/reviseAndResubmit/withdraw + comment state
                        (itemComments, batchComments — addItemComment/addBatchComment take an
                        explicit author param)
+    useCatalogModals.ts  Shared modal-state for EVERY portal's catalog detail surfaces (entity/
+                       dataItem/advancedSearch/requestDetail, +create/edit/delete-confirm when
+                       mutation handlers are passed in). Paired with
+                       components/shared/CatalogRecordModals.tsx, which renders whatever this
+                       returns — see both files' header comments for the full API
+                       (`openEntity` vs `openEntityById`: the latter resolves a SubjectArea from
+                       just an Entity, for context rows that only carry the Entity).
+    useMyRequests.ts     Shared "my requests" tab logic (BoardPortal + ApproverPortal): filter,
+                       open/revise/resubmit/withdraw/export. Paired with
+                       components/MyRequestsPanel.tsx for the JSX.
+    useReviewQueue.ts    Shared review-queue mechanics (ApproverPortal + HODPortal): list
+                       filters, bulk selection, comment-draft flushing, Focus Mode, reject
+                       dialog. Each portal computes its own pending/approved/rejected
+                       Submission arrays (the scoping differs per role) and hands them in.
+                       Paired with components/ReviewQueueList.tsx + ReviewQueueBulkBar.tsx.
   lib/                 Framework-free shared logic (single sources of truth):
-    catalog.ts         flatten/count/find helpers + computeChangedFields
+    catalog.ts         flatten/count/find helpers + computeChangedFields + isBatchBlocked (the
+                       cross-request dependency guard, used by useReviewQueue)
     submissions.ts      groupRequestsByBatch → Submission (one request = one batchId; carries
                        stage, dgoReviewedBy/dgoReviewedAt, reviewedBy/reviewedAt)
     requestGroups.ts    groupRequestsBySubjectArea → EntityBlock (entity ↔ child data items,
@@ -115,29 +146,43 @@ src/app/
   data/                mockData.ts (catalog) · initialRequests.ts (seed queue + demo data,
                        grouped into 6 demo batchIds, every item seeded at stage 'dgo')
   components/
+    PortalHeader.tsx     Shared sticky header (brand + tab switcher + an `actions` slot each
+                       portal fills in) — see its header comment for why tabs/actions render
+                       unconditionally regardless of which tab is active.
+    PortalFooter.tsx     Trivial shared footer (`DictCentral · {label}`).
+    CatalogBrowser.tsx   Shared Tree/Table catalog section (SearchBar + view toggle +
+                       TreeView/TableView) — owns its own view/search state, `readOnly` only
+                       changes the helper copy under the section header.
+    MyRequestsPanel.tsx  Shared "My Requests" tab JSX (filter pills, BoardRequestCard list,
+                       detail/revise views, WithdrawDialog) — driven by useMyRequests.
+    ReviewQueueList.tsx  Shared review-queue list JSX (filter pills, Focus Mode entry, search/
+                       type/SA filters, select-all, SubmissionCard list) — driven by
+                       useReviewQueue.
+    ReviewQueueBulkBar.tsx Shared sticky bulk-action bar ("N selected" · Clear · Reject
+                       Selected · Approve Selected).
     SubmissionCard.tsx      One request = one card (requester · time · operation badges · status,
-                            optionally `showDgoReviewer` for the HOD queue); the Requests-tab
-                            list. Click → SubmissionDetailView.
+                            optionally `showDgoReviewer` for the HOD queue); the Review-Requests-
+                            tab list. Click → SubmissionDetailView.
     SubmissionDetailView.tsx Full request view: header (operation badges next to the
-                            status badge, dgoReviewedBy line when present, no separate per-row
-                            Operation/Status columns) + Approve/Reject (whole request, custom
-                            `approveLabel`) + optional "Validate Fields" button (`onValidate`) +
-                            generic comment + HierarchyRequestTable scoped to that batch
-                            (`disableItemComments` forces its per-row comments read-only for
-                            HOD). Also reused read-only by the Board Member's My Requests
+                            status badge, dgoReviewedBy line when present and !readOnly, no
+                            separate per-row Operation/Status columns) + Approve/Reject (whole
+                            request, custom `approveLabel`) + optional "Validate Fields" button
+                            (`onValidate`) + generic comment + HierarchyRequestTable scoped to
+                            that batch (`disableItemComments` removes its per-row Comments
+                            column entirely for HOD). Also reused read-only by My Requests
                             (comments shown but not editable, reviewer/timestamp shown once
                             resolved); Export appears for pending/rejected requests only, not
                             approved ones; Edit & Resubmit appears only when rejected (opens
                             ReviseSubmissionView); Withdraw appears only when pending.
-    ReviseSubmissionView.tsx Board Member only, rejected requests only: the editable
-                            counterpart to SubmissionDetailView — same header/rejection-
-                            reason/generic-comment layout, but EditableHierarchyRequestTable
-                            instead of the read-only table. Validates required fields
-                            client-side before calling useCatalog.reviseAndResubmit, which
-                            resubmits under the SAME request/batch ids (so comment threads
-                            carry over) with status flipped back to 'pending' and stage reset
-                            to 'dgo'.
-    BoardRequestCard.tsx    Board Member's request-list card — operation badge(s),
+    ReviseSubmissionView.tsx The editable counterpart to SubmissionDetailView, opened from a
+                            rejected request in either My Requests panel (Board or DGO) —
+                            same header/rejection-reason/generic-comment layout, but
+                            EditableHierarchyRequestTable instead of the read-only table.
+                            Validates required fields client-side before calling
+                            useCatalog.reviseAndResubmit, which resubmits under the SAME
+                            request/batch ids (so comment threads carry over) with status
+                            flipped back to 'pending' and stage reset to 'dgo'.
+    BoardRequestCard.tsx    The My-Requests-tab card (Board or DGO) — operation badge(s),
                             status, and (once resolved) reviewer name + timestamp only.
                             No Withdraw action here — that only lives in
                             SubmissionDetailView (click into the request first).
@@ -155,7 +200,10 @@ src/app/
                        highlighted, same look a create's "all new" gets, also used for delete
                        requests which default to Full View with the toggle hidden; an
                        unchanged-entity context row instead opens the plain EntityModal)
-    shared/            Cross-component pieces: DiffGrid (+getRequestDiff), RejectDialog,
+    shared/            Cross-component pieces: CatalogRecordModals.tsx (renders EntityModal/
+                       DataItemModal/AdvancedSearchModal/CreateModal/EditModal/
+                       RequestDetailModal/DeleteConfirmDialog from useCatalogModals' state —
+                       see Architecture above), DiffGrid (+getRequestDiff), RejectDialog,
                        WithdrawDialog (board/DGO's withdraw confirmation — no reason needed,
                        unlike RejectDialog), DeleteConfirmDialog (confirms a delete REQUEST, not
                        an immediate delete — used from EntityModal/DataItemModal's Delete
@@ -312,15 +360,16 @@ fields (`parentEntityId`/`parentEntityName` for data items).
   deliberately no shortcut from the list card itself). Once a request is approved or
   rejected it can no longer be withdrawn — the action disappears from the UI entirely
   in those states.
-- **My Requests filter** (`BoardPortal.tsx`'s `reqFilter`): defaults to **All** (every submission
-  the Board Member has made, newest first — `groupRequestsByBatch` already sorts that way), with
-  Pending/Approved/Rejected as additional narrowing tabs, same pill-button pattern as the
-  DGO/HOD queue filters.
-- **Cross-request dependency guard** (`isBatchBlocked`, duplicated identically in
-  `ApproverPortal` and `HODPortal`): a request can still contain a data-item create
-  whose parent entity is itself a pending create in a *different* request — that other
-  request must be approved first. The blocked request's Approve button shows a 🔒 and a
-  banner explains why.
+- **My Requests filter** (`hooks/useMyRequests.ts`'s `filter`, shared by BoardPortal and
+  ApproverPortal): defaults to **All** (every submission the requester has made, newest first
+  — `groupRequestsByBatch` already sorts that way), with Pending/Approved/Rejected as
+  additional narrowing tabs, same pill-button pattern as the DGO/HOD queue filters
+  (`hooks/useReviewQueue.ts`'s `reqFilter`).
+- **Cross-request dependency guard** (`lib/catalog.ts`'s `isBatchBlocked`, called from
+  `hooks/useReviewQueue.ts` — shared by ApproverPortal and HODPortal, not duplicated): a
+  request can still contain a data-item create whose parent entity is itself a pending create
+  in a *different* request — that other request must be approved first. The blocked request's
+  Approve button shows a 🔒 and a banner explains why.
 - **No per-row Operation/Status columns** in `HierarchyRequestTable` — the
   whole request's operation(s) and status are shown once, in the
   `SubmissionDetailView`/`SubmissionCard`/`BoardRequestCard` header, never
@@ -356,9 +405,9 @@ fields (`parentEntityId`/`parentEntityName` for data items).
   `CommentThread` is a controlled component: it renders the thread plus a
   plain draft `<input>`, nothing else — typing only updates a draft value
   held by the PARENT (`SubmissionDetailView`'s `itemDrafts`/`genericDraft`
-  props, controlled in turn by `ApproverPortal`/`HODPortal` for the
-  single-open-request view or by `FocusModeView` for the keyboard-driven
-  queue). A draft is only actually appended to its thread (via
+  props, controlled in turn by `hooks/useReviewQueue.ts`'s `openItemDrafts`/
+  `openGenericDraft` for the single-open-request view, shared by ApproverPortal
+  and HODPortal, or by `FocusModeView` for the keyboard-driven queue). A draft is only actually appended to its thread (via
   `onAddItemComment`/`onAddBatchComment`) at the moment Approve is clicked,
   or the Reject dialog is opened — see `flushOpenDrafts`/`flushDrafts` in
   each. This single commit point has to be reachable from BOTH the on-screen
